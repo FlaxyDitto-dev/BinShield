@@ -27,6 +27,12 @@ from ai_auditor import (
     DisinfectionResult,
     PassAuditReport,
 )
+from auto_setup import (
+    check_environment,
+    discover_all_ghidra_paths,
+    ensure_ghidra,
+    run_full_auto_setup,
+)
 from binary_patcher import BinaryPatcher, PatchRecord, QuarantineEntry, QuarantineManager
 from cuda_engine import (
     CUDAFlashAttentionEngine,
@@ -139,9 +145,9 @@ class GhidraGuardApp(ctk.CTk):
         self.scanner = SystemScanner(log_callback=self.log)
         self.patcher = BinaryPatcher(log_callback=self.log)
 
-        # Auto-discover Ghidra on first launch if not configured
+        # Auto-discover Ghidra (C:\ and %LOCALAPPDATA%\GhidraGuard\tools) on first launch
         if not self.settings.data.get("ghidra_headless_path"):
-            discovered = discover_ghidra_headless()
+            discovered = discover_all_ghidra_paths()
             if discovered:
                 self.settings.data["ghidra_headless_path"] = discovered[0]
                 self.settings.save()
@@ -1315,6 +1321,45 @@ class GhidraGuardApp(ctk.CTk):
             text_color=TEXT_PRIMARY,
         ).pack(anchor="w", padx=18, pady=(16, 12))
 
+        # --- One-Click Automatic Setup Everything Card ---
+        setup_card = ctk.CTkFrame(frame, fg_color=BG_CARD_ALT, corner_radius=12, border_width=1, border_color=BORDER_ACCENT)
+        setup_card.pack(fill="x", padx=18, pady=8)
+
+        ctk.CTkLabel(
+            setup_card,
+            text="Automatic Setup (JDK 21 + Official Ghidra + PyTorch CUDA Flash Attention)",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=BORDER_ACCENT,
+        ).pack(anchor="w", padx=14, pady=(12, 4))
+
+        env_st = check_environment()
+        self.lbl_auto_setup_status = ctk.CTkLabel(
+            setup_card,
+            text=env_st.summary_line(),
+            font=ctk.CTkFont(family="Consolas", size=11),
+            text_color=ACCENT_GREEN if env_st.all_ready else ACCENT_AMBER,
+            anchor="w",
+        )
+        self.lbl_auto_setup_status.pack(fill="x", padx=14, pady=(0, 8))
+
+        s_row = ctk.CTkFrame(setup_card, fg_color="transparent")
+        s_row.pack(fill="x", padx=14, pady=(0, 12))
+        ctk.CTkButton(
+            s_row,
+            text="Auto-Setup Everything (JDK + Ghidra + CUDA AI)",
+            fg_color=ACCENT_GREEN,
+            hover_color="#059669",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._run_auto_setup_all_async,
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(
+            s_row,
+            text="Auto-Install Ghidra Only",
+            fg_color=ACCENT_CYAN,
+            hover_color=ACCENT_CYAN_HOVER,
+            command=self._run_auto_setup_ghidra_async,
+        ).pack(side="left")
+
         # --- Ghidra Section ---
         g_card = ctk.CTkFrame(frame, fg_color=BG_CARD_ALT, corner_radius=12, border_width=1, border_color=BORDER_GLASS)
         g_card.pack(fill="x", padx=18, pady=8)
@@ -1513,6 +1558,66 @@ class GhidraGuardApp(ctk.CTk):
                 self.opt_model.configure(values=vals)
             self.opt_model.set(folder)
             self.log(f"[AI] Selected local model directory: {folder}")
+
+    def _run_auto_setup_ghidra_async(self) -> None:
+        self.lbl_auto_setup_status.configure(text="Auto-installing official Ghidra...", text_color=ACCENT_AMBER)
+
+        def _worker() -> None:
+            try:
+                path = ensure_ghidra(self.log)
+                st = check_environment()
+
+                def _done() -> None:
+                    self.ent_ghidra.delete(0, "end")
+                    self.ent_ghidra.insert(0, path)
+                    self._save_settings()
+                    self.lbl_auto_setup_status.configure(
+                        text=st.summary_line(),
+                        text_color=ACCENT_GREEN if st.all_ready else ACCENT_AMBER,
+                    )
+                    messagebox.showinfo("Ghidra Ready", f"Ghidra Headless configured:\n{path}")
+
+                self.after(0, _done)
+            except Exception as exc:
+                self.log(f"[SETUP] Ghidra auto-setup failed: {exc}")
+                self.after(0, lambda e=exc: messagebox.showerror("Ghidra Auto-Setup Failed", str(e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _run_auto_setup_all_async(self) -> None:
+        self.lbl_auto_setup_status.configure(text="Running full auto-setup (JDK 21 + Ghidra + CUDA AI)...", text_color=ACCENT_AMBER)
+
+        def _worker() -> None:
+            try:
+                res = run_full_auto_setup(
+                    preload_model=False,
+                    model_id=self.settings.data.get("llm_model", "") or DEFAULT_LOCAL_MODEL,
+                    log_callback=self.log,
+                )
+                st = check_environment()
+                self.gpu_info = detect_cuda_hardware()
+
+                def _done() -> None:
+                    if res.get("ghidra_headless_path"):
+                        self.ent_ghidra.delete(0, "end")
+                        self.ent_ghidra.insert(0, res["ghidra_headless_path"])
+                    self._save_settings()
+                    self.lbl_auto_setup_status.configure(
+                        text=st.summary_line(),
+                        text_color=ACCENT_GREEN if st.all_ready else ACCENT_AMBER,
+                    )
+                    self.lbl_cuda_status.configure(text=self.gpu_info.short_badge())
+                    messagebox.showinfo(
+                        "Auto-Setup Complete",
+                        f"Environment verified and configured:\n{st.summary_line()}",
+                    )
+
+                self.after(0, _done)
+            except Exception as exc:
+                self.log(f"[SETUP] Full auto-setup failed: {exc}")
+                self.after(0, lambda e=exc: messagebox.showerror("Auto-Setup Failed", str(e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _run_cuda_self_test_async(self) -> None:
         self.log("[CUDA] Running direct CUDA & Flash Attention self-test...")
