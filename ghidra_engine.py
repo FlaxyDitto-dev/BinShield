@@ -499,7 +499,7 @@ class GhidraEngine:
         self,
         headless_path: Optional[str] = None,
         workspace_root: Optional[str] = None,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = 1800,
         log_callback: Optional[Callable[[str], None]] = None,
     ):
         self._log = log_callback or (lambda msg: None)
@@ -590,7 +590,7 @@ class GhidraEngine:
                     k in clean for k in ("INFO", "ERROR", "WARN", "GhidraGuardExport", "ANALYZING", "IMPORTING")
                 ):
                     self._log(f"[GHIDRA] {clean[:180]}")
-                if time.time() - start > self.timeout_seconds:
+                if self.timeout_seconds > 0 and (time.time() - start > self.timeout_seconds):
                     proc.kill()
                     raise TimeoutError(
                         f"Ghidra Headless timed out after {self.timeout_seconds}s on {isolated_bin.name}"

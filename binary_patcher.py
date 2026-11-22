@@ -217,62 +217,67 @@ class BinaryPatcher:
         pass_number: int = 1,
     ) -> List[PatchRecord]:
         """
-        Apply a list of PatchInstructions to input_binary, write output_binary,
+        Apply a list of PatchInstructions to input_binary using streaming / seek-based I/O
+        (no file size limit, constant O(1) RAM even on multi-GB binaries), write output_binary,
         strip invalidated Authenticode signature, and recalculate PE checksum.
         """
         if not os.path.isfile(input_binary):
             raise FileNotFoundError(f"Input binary not found: {input_binary}")
 
-        pe = pefile.PE(input_binary, fast_load=False)
-        raw_data = bytearray(pe.__data__)
+        file_size = os.path.getsize(input_binary)
+        pe = pefile.PE(input_binary, fast_load=True)
+        Path(output_binary).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(input_binary, output_binary)
         records: List[PatchRecord] = []
 
-        for inst in instructions:
-            try:
-                file_off, va, sec_name = self.resolve_file_offset(pe, inst)
-                patch_bytes, note = self.compute_patch_bytes(raw_data, file_off, inst)
+        with open(output_binary, "r+b") as fh:
+            for inst in instructions:
+                try:
+                    file_off, va, sec_name = self.resolve_file_offset(pe, inst)
+                    if file_off >= file_size:
+                        self._log(f"[PATCH] Skipping {inst.function_name}: offset exceeds file size.")
+                        continue
 
-                if file_off + len(patch_bytes) > len(raw_data):
-                    self._log(f"[PATCH] Skipping {inst.function_name}: patch exceeds file size.")
-                    continue
+                    fh.seek(file_off)
+                    window = bytearray(fh.read(64))
+                    patch_bytes, note = self.compute_patch_bytes(window, 0, inst)
 
-                before_bytes = bytes(raw_data[file_off : file_off + len(patch_bytes)])
-                if before_bytes == patch_bytes:
-                    self._log(f"[PATCH] {inst.function_name} @ {hex(file_off)} already patched; skipping.")
-                    continue
+                    if file_off + len(patch_bytes) > file_size:
+                        self._log(f"[PATCH] Skipping {inst.function_name}: patch exceeds file size.")
+                        continue
 
-                raw_data[file_off : file_off + len(patch_bytes)] = patch_bytes
+                    before_bytes = bytes(window[: len(patch_bytes)])
+                    if before_bytes == patch_bytes:
+                        self._log(f"[PATCH] {inst.function_name} @ {hex(file_off)} already patched; skipping.")
+                        continue
 
-                rec = PatchRecord(
-                    pass_number=pass_number,
-                    function_name=inst.function_name,
-                    section_name=sec_name,
-                    va=hex(va),
-                    file_offset=hex(file_off),
-                    strategy=inst.strategy.upper(),
-                    before_hex=before_bytes.hex(" ").upper(),
-                    after_hex=patch_bytes.hex(" ").upper(),
-                    reason=inst.reason,
-                    note=note,
-                )
-                records.append(rec)
-                self._log(
-                    f"[PATCH] Pass {pass_number}: Patched {inst.function_name} ({sec_name} @ {rec.file_offset}) "
-                    f"[{rec.before_hex}] -> [{rec.after_hex}] ({note})"
-                )
-            except Exception as exc:
-                self._log(f"[PATCH] Warning: could not apply patch to {inst.function_name}: {exc}")
+                    fh.seek(file_off)
+                    fh.write(patch_bytes)
+
+                    rec = PatchRecord(
+                        pass_number=pass_number,
+                        function_name=inst.function_name,
+                        section_name=sec_name,
+                        va=hex(va),
+                        file_offset=hex(file_off),
+                        strategy=inst.strategy.upper(),
+                        before_hex=before_bytes.hex(" ").upper(),
+                        after_hex=patch_bytes.hex(" ").upper(),
+                        reason=inst.reason,
+                        note=note,
+                    )
+                    records.append(rec)
+                    self._log(
+                        f"[PATCH] Pass {pass_number}: Patched {inst.function_name} ({sec_name} @ {rec.file_offset}) "
+                        f"[{rec.before_hex}] -> [{rec.after_hex}] ({note})"
+                    )
+                except Exception as exc:
+                    self._log(f"[PATCH] Warning: could not apply patch to {inst.function_name}: {exc}")
 
         pe.close()
 
         if not records:
-            shutil.copy2(input_binary, output_binary)
             return records
-
-        # Write raw patched bytes first, then strip Authenticode signature & fix PE CheckSum
-        Path(output_binary).parent.mkdir(parents=True, exist_ok=True)
-        with open(output_binary, "wb") as f:
-            f.write(raw_data)
 
         self._strip_signature_and_fix_checksum(output_binary)
         return records
@@ -280,42 +285,69 @@ class BinaryPatcher:
     def _strip_signature_and_fix_checksum(self, binary_path: str) -> None:
         """
         Strip embedded Authenticode digital signature (invalidated after patching)
-        and recalculate the PE OptionalHeader CheckSum.
+        and recalculate the PE OptionalHeader CheckSum using streaming 1 MB chunks
+        (no file size limit).
         """
-        pe = pefile.PE(binary_path, fast_load=False)
+        import struct
+
         stripped = False
+        file_size = os.path.getsize(binary_path)
+        with open(binary_path, "r+b") as f:
+            dos = f.read(64)
+            if len(dos) < 64 or dos[:2] != b"MZ":
+                return
+            pe_off = struct.unpack_from("<I", dos, 0x3C)[0]
+            f.seek(pe_off)
+            pe_hdr = f.read(24 + 240)
+            if len(pe_hdr) < 24 + 96 or pe_hdr[:4] != b"PE\x00\x00":
+                return
 
-        sec_idx = pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]
-        if len(pe.OPTIONAL_HEADER.DATA_DIRECTORY) > sec_idx:
-            sec_dir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[sec_idx]
-            cert_offset = sec_dir.VirtualAddress  # For SECURITY dir, VA is actually a file offset
-            cert_size = sec_dir.Size
-            if cert_offset != 0 and cert_size > 0:
-                sec_dir.VirtualAddress = 0
-                sec_dir.Size = 0
-                stripped = True
-                self._log(
-                    f"[PATCH] Stripped invalidated Authenticode signature "
-                    f"(offset={hex(cert_offset)}, size={cert_size} bytes)."
-                )
-                # Rebuild and truncate trailing certificate blob if at EOF
-                new_bytes = bytearray(pe.write())
-                if cert_offset + cert_size >= len(new_bytes) - 16 and cert_offset < len(new_bytes):
-                    new_bytes = new_bytes[:cert_offset]
-                pe.close()
-                with open(binary_path, "wb") as f:
-                    f.write(new_bytes)
-                pe = pefile.PE(binary_path, fast_load=False)
+            opt_off = pe_off + 24
+            opt_magic = struct.unpack_from("<H", pe_hdr, 24)[0]
+            is_pe32_plus = opt_magic == 0x20B
+            data_dir_rel = 24 + (112 if is_pe32_plus else 96)
+            sec_dir_off = pe_off + data_dir_rel + (4 * 8)
 
-        # Recalculate PE header checksum
-        old_csum = pe.OPTIONAL_HEADER.CheckSum
-        new_csum = pe.generate_checksum()
-        pe.OPTIONAL_HEADER.CheckSum = new_csum
-        final_bytes = pe.write()
-        pe.close()
+            if data_dir_rel + 40 <= len(pe_hdr):
+                cert_offset, cert_size = struct.unpack_from("<II", pe_hdr, data_dir_rel + 32)
+                if cert_offset != 0 and cert_size > 0:
+                    f.seek(sec_dir_off)
+                    f.write(b"\x00" * 8)
+                    stripped = True
+                    self._log(
+                        f"[PATCH] Stripped invalidated Authenticode signature "
+                        f"(offset={hex(cert_offset)}, size={cert_size} bytes)."
+                    )
+                    if cert_offset + cert_size >= file_size - 16 and cert_offset < file_size:
+                        f.truncate(cert_offset)
+                        file_size = cert_offset
 
-        with open(binary_path, "wb") as f:
-            f.write(final_bytes)
+            # Stream-compute standard Windows PE CheckSum (16-bit fold + file size)
+            csum_off = opt_off + 64
+            f.seek(csum_off)
+            old_csum = struct.unpack("<I", f.read(4))[0]
+            f.seek(csum_off)
+            f.write(b"\x00\x00\x00\x00")
+            f.flush()
+
+            f.seek(0)
+            checksum = 0
+            chunk_size = 1024 * 1024  # even multiple of 2 bytes
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                if len(chunk) & 1:
+                    chunk += b"\x00"
+                # Fast word sum using memoryview('H')
+                for word in memoryview(chunk).cast("H"):
+                    checksum += word
+                checksum = (checksum & 0xFFFF) + (checksum >> 16)
+                checksum = (checksum & 0xFFFF) + (checksum >> 16)
+
+            new_csum = (checksum + file_size) & 0xFFFFFFFF
+            f.seek(csum_off)
+            f.write(struct.pack("<I", new_csum))
 
         self._log(
             f"[PATCH] Recalculated PE CheckSum: {hex(old_csum)} -> {hex(new_csum)}"
@@ -406,19 +438,29 @@ class QuarantineManager:
 
         self.terminate_processes_using_file(file_path)
 
-        raw = Path(file_path).read_bytes()
-        sha256 = hashlib.sha256(raw).hexdigest()
-
-        # Neutralize header bytes so quarantined sample cannot be executed accidentally
-        buf = bytearray(raw)
-        limit = min(4096, len(buf))
-        for i in range(limit):
-            buf[i] ^= QUARANTINE_XOR_KEY
-
         entry_id = uuid.uuid4().hex[:12]
         vault_filename = f"{entry_id}_{Path(file_path).name}.ggquar"
         vault_path = self.quarantine_dir / vault_filename
-        vault_path.write_bytes(buf)
+
+        # Stream-copy in 1 MB chunks while computing SHA-256 and XOR-neutralizing first 4KB (no file size limit)
+        h = hashlib.sha256()
+        written = 0
+        with open(file_path, "rb") as src, open(vault_path, "wb") as dst:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+                if written < 4096:
+                    buf = bytearray(chunk)
+                    limit = min(4096 - written, len(buf))
+                    for i in range(limit):
+                        buf[i] ^= QUARANTINE_XOR_KEY
+                    dst.write(buf)
+                else:
+                    dst.write(chunk)
+                written += len(chunk)
+        sha256 = h.hexdigest()
 
         # Remove original file
         os.remove(file_path)
@@ -449,14 +491,25 @@ class QuarantineManager:
         if not vault_path.is_file():
             raise FileNotFoundError(f"Vault file missing: {vault_path}")
 
-        buf = bytearray(vault_path.read_bytes())
-        limit = min(4096, len(buf))
-        for i in range(limit):
-            buf[i] ^= QUARANTINE_XOR_KEY
-
         orig_path = Path(target["original_path"])
         orig_path.parent.mkdir(parents=True, exist_ok=True)
-        orig_path.write_bytes(buf)
+
+        # Stream-restore in 1 MB chunks while un-XORing first 4KB (no file size limit)
+        written = 0
+        with open(vault_path, "rb") as src, open(orig_path, "wb") as dst:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                if written < 4096:
+                    buf = bytearray(chunk)
+                    limit = min(4096 - written, len(buf))
+                    for i in range(limit):
+                        buf[i] ^= QUARANTINE_XOR_KEY
+                    dst.write(buf)
+                else:
+                    dst.write(chunk)
+                written += len(chunk)
         vault_path.unlink(missing_ok=True)
 
         items = [x for x in items if x.get("entry_id") != entry_id]

@@ -73,19 +73,31 @@ class QuarantineVault(context: Context) {
 
     fun quarantineFile(sourceFile: File, displayName: String, reason: String): AndroidQuarantineEntry {
         require(sourceFile.isFile && sourceFile.canRead()) { "Cannot read file: ${sourceFile.absolutePath}" }
-        val raw = sourceFile.readBytes()
         val sha = ApkScanner.sha256(sourceFile)
-
-        // XOR-neutralize first 4KB header (ZIP/PK or ELF magic) so it cannot be executed/installed
-        val limit = minOf(4096, raw.size)
-        for (i in 0 until limit) {
-            raw[i] = (raw[i].toInt() xor xorKey.toInt()).toByte()
-        }
-
         val entryId = UUID.randomUUID().toString().replace("-", "").take(12)
         val safeName = displayName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         val vaultFilename = "${entryId}_${safeName}.ggquar"
-        File(vaultDir, vaultFilename).writeBytes(raw)
+        val vaultFile = File(vaultDir, vaultFilename)
+
+        // Stream-copy in 1 MB chunks while XOR-neutralizing first 4KB (no file size limit)
+        var written = 0L
+        val buf = ByteArray(1024 * 1024)
+        sourceFile.inputStream().use { inp ->
+            vaultFile.outputStream().use { out ->
+                while (true) {
+                    val n = inp.read(buf)
+                    if (n <= 0) break
+                    if (written < 4096L) {
+                        val limit = minOf((4096L - written).toInt(), n)
+                        for (i in 0 until limit) {
+                            buf[i] = (buf[i].toInt() xor xorKey.toInt()).toByte()
+                        }
+                    }
+                    out.write(buf, 0, n)
+                    written += n
+                }
+            }
+        }
 
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
         val entry = AndroidQuarantineEntry(
@@ -96,7 +108,7 @@ class QuarantineVault(context: Context) {
             sha256 = sha,
             reason = reason,
             timestamp = stamp,
-            sizeBytes = raw.size.toLong(),
+            sizeBytes = written,
         )
         val all = listEntries().toMutableList()
         all.add(0, entry)
@@ -111,17 +123,30 @@ class QuarantineVault(context: Context) {
         val vaultFile = File(vaultDir, target.vaultFilename)
         require(vaultFile.isFile) { "Vault payload missing: ${target.vaultFilename}" }
 
-        val raw = vaultFile.readBytes()
-        val limit = minOf(4096, raw.size)
-        for (i in 0 until limit) {
-            raw[i] = (raw[i].toInt() xor xorKey.toInt()).toByte()
-        }
-
         exportDir.mkdirs()
         val ext = File(target.displayName).extension.ifBlank { "apk" }
         val base = File(target.displayName).nameWithoutExtension.ifBlank { target.displayName }
         val outFile = File(exportDir, "${base}_restored.$ext")
-        outFile.writeBytes(raw)
+
+        // Stream-restore in 1 MB chunks while un-XORing first 4KB (no file size limit)
+        var written = 0L
+        val buf = ByteArray(1024 * 1024)
+        vaultFile.inputStream().use { inp ->
+            outFile.outputStream().use { out ->
+                while (true) {
+                    val n = inp.read(buf)
+                    if (n <= 0) break
+                    if (written < 4096L) {
+                        val limit = minOf((4096L - written).toInt(), n)
+                        for (i in 0 until limit) {
+                            buf[i] = (buf[i].toInt() xor xorKey.toInt()).toByte()
+                        }
+                    }
+                    out.write(buf, 0, n)
+                    written += n
+                }
+            }
+        }
         vaultFile.delete()
         entries.removeAll { it.entryId == entryId }
         saveEntries(entries)

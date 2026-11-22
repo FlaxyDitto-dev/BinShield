@@ -139,15 +139,12 @@ class NetworkConnectionInfo:
 # Low-level PE & Windows Helpers
 # ---------------------------------------------------------------------------
 
-def compute_sha256(file_path: str, max_bytes: int = 64 * 1024 * 1024) -> str:
-    """Compute SHA-256 hash of a file (capped for very large binaries)."""
+def compute_sha256(file_path: str) -> str:
+    """Stream-compute SHA-256 hash of any file in 1 MB chunks (no file size limit)."""
     h = hashlib.sha256()
     try:
-        size = os.path.getsize(file_path)
-        if size > max_bytes:
-            return "(file > 64MB)"
         with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 h.update(chunk)
         return h.hexdigest()
     except OSError:

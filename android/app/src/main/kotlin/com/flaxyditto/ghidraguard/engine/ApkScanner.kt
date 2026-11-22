@@ -265,7 +265,7 @@ object ApkScanner {
 
                     if (name.endsWith(".dex")) {
                         dexCount++
-                        if (dexInspected < 3 && entry.size < 25_000_000) {
+                        if (dexInspected < 3) {
                             dexInspected++
                             val bytes = readBounded(zip.getInputStream(entry), 512 * 1024)
                             val ent = shannonEntropy(bytes)
@@ -274,7 +274,7 @@ object ApkScanner {
                             suspiciousStrings.addAll(found)
                         }
                     } else if (name.startsWith("lib/") && name.endsWith(".so")) {
-                        if (soInspected < 8 && entry.size < 30_000_000) {
+                        if (soInspected < 8) {
                             soInspected++
                             val bytes = readBounded(zip.getInputStream(entry), 512 * 1024)
                             val ent = shannonEntropy(bytes)
