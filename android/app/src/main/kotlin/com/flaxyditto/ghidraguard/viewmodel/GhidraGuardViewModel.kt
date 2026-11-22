@@ -16,6 +16,7 @@ import com.flaxyditto.ghidraguard.engine.ElfPatcher
 import com.flaxyditto.ghidraguard.engine.LocalAiAuditor
 import com.flaxyditto.ghidraguard.engine.NetworkMonitor
 import com.flaxyditto.ghidraguard.engine.NetworkStatusSummary
+import com.flaxyditto.ghidraguard.engine.PeAnalyzerPatcher
 import com.flaxyditto.ghidraguard.engine.QuarantineVault
 import com.flaxyditto.ghidraguard.engine.SocketConnectionInfo
 import kotlinx.coroutines.Dispatchers
@@ -241,22 +242,29 @@ class GhidraGuardViewModel(application: Application) : AndroidViewModel(applicat
                 getApplication<Application>().contentResolver.openInputStream(uri)?.use { inp ->
                     cacheFile.outputStream().use { out -> inp.copyTo(out) }
                 }
-                val finding = ApkScanner.analyzeApkFile(
-                    apkFile = cacheFile,
-                    appName = displayName,
-                    packageName = displayName,
-                    source = "Manual APK",
-                )
+                val finding = if (PeAnalyzerPatcher.isPeFile(cacheFile)) {
+                    PeAnalyzerPatcher.analyzePeFile(
+                        peFile = cacheFile,
+                        displayName = displayName,
+                    )
+                } else {
+                    ApkScanner.analyzeApkFile(
+                        apkFile = cacheFile,
+                        appName = displayName,
+                        packageName = displayName,
+                        source = "Manual APK",
+                    )
+                }
                 if (finding != null) {
-                    log("[SCAN] Analyzed $displayName -> Risk ${finding.riskScore} (${finding.severity}), Entropy ${finding.maxEntropy}")
+                    log("[SCAN] Analyzed $displayName [${finding.source}] -> Risk ${finding.riskScore} (${finding.severity}), Entropy ${finding.maxEntropy}")
                     _uiState.update { st ->
                         st.copy(
                             findings = listOf(finding) + st.findings,
-                            scanStatus = "Analyzed $displayName (Risk ${finding.riskScore} / ${finding.severity})",
+                            scanStatus = "Analyzed $displayName (${finding.source} • Risk ${finding.riskScore} / ${finding.severity})",
                         )
                     }
                 } else {
-                    log("[SCAN] Could not parse $displayName as an APK.")
+                    log("[SCAN] Could not parse $displayName as a valid APK or Windows PE (.exe/.dll).")
                 }
             } catch (e: Exception) {
                 log("[SCAN] Error reading file: ${e.message}")
@@ -301,9 +309,11 @@ class GhidraGuardViewModel(application: Application) : AndroidViewModel(applicat
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val isWindowsPe = target.source.startsWith("Windows PE") || PeAnalyzerPatcher.isPeFile(File(target.apkPath))
+                val ext = if (isWindowsPe) (File(target.appName).extension.ifBlank { "exe" }) else "apk"
                 val workDir = File(getApplication<Application>().filesDir, "patch_sessions/${System.currentTimeMillis()}").apply { mkdirs() }
-                var currentApk = File(workDir, "pass0.apk")
-                File(target.apkPath).copyTo(currentApk, overwrite = true)
+                var currentBin = File(workDir, "pass0.$ext")
+                File(target.apkPath).copyTo(currentBin, overwrite = true)
 
                 val allReports = mutableListOf<AiAuditReport>()
                 val allPatches = mutableListOf<AndroidPatchRecord>()
@@ -332,35 +342,48 @@ class GhidraGuardViewModel(application: Application) : AndroidViewModel(applicat
                         break
                     }
 
-                    val nextApk = File(workDir, "pass$pass.apk")
-                    val applied = ElfPatcher.patchApkNativeLibs(
-                        inputApk = currentApk,
-                        outputApk = nextApk,
-                        instructions = report.patchInstructions,
-                        passNumber = pass,
-                    )
+                    val nextBin = File(workDir, "pass$pass.$ext")
+                    val applied = if (isWindowsPe) {
+                        PeAnalyzerPatcher.patchPeBinary(
+                            inputPe = currentBin,
+                            outputPe = nextBin,
+                            instructions = report.patchInstructions,
+                            passNumber = pass,
+                        )
+                    } else {
+                        ElfPatcher.patchApkNativeLibs(
+                            inputApk = currentBin,
+                            outputApk = nextBin,
+                            instructions = report.patchInstructions,
+                            passNumber = pass,
+                        )
+                    }
                     if (applied.isEmpty()) {
-                        log("[PATCH] Pass $pass: 0 verified executable ELF offsets could be patched.")
+                        log("[PATCH] Pass $pass: 0 verified executable offsets could be patched.")
                         break
                     }
                     allPatches.addAll(applied)
                     applied.forEach { rec ->
                         log("[PATCH] ${rec.targetEntry} @ ${rec.fileOffsetHex} [${rec.beforeHex}] -> [${rec.afterHex}]")
                     }
-                    currentApk = nextApk
-                    currentFinding = ApkScanner.analyzeApkFile(
-                        apkFile = currentApk,
-                        appName = target.appName,
-                        packageName = target.packageName,
-                        source = "Sanitized Pass $pass",
-                        requestedPermissions = target.dangerousPermissions,
-                        isDebuggable = target.isDebuggable,
-                    ) ?: currentFinding
+                    currentBin = nextBin
+                    currentFinding = if (isWindowsPe) {
+                        PeAnalyzerPatcher.analyzePeFile(currentBin, target.appName) ?: currentFinding
+                    } else {
+                        ApkScanner.analyzeApkFile(
+                            apkFile = currentBin,
+                            appName = target.appName,
+                            packageName = target.packageName,
+                            source = "Sanitized Pass $pass",
+                            requestedPermissions = target.dangerousPermissions,
+                            isDebuggable = target.isDebuggable,
+                        ) ?: currentFinding
+                    }
 
                     _uiState.update {
                         it.copy(
                             appliedPatches = allPatches.toList(),
-                            sanitizedApkPath = currentApk.absolutePath,
+                            sanitizedApkPath = currentBin.absolutePath,
                         )
                     }
                 }

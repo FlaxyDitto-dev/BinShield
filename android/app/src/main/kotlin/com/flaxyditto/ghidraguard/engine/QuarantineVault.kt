@@ -118,7 +118,9 @@ class QuarantineVault(context: Context) {
         }
 
         exportDir.mkdirs()
-        val outFile = File(exportDir, "${target.displayName}_restored.apk")
+        val ext = File(target.displayName).extension.ifBlank { "apk" }
+        val base = File(target.displayName).nameWithoutExtension.ifBlank { target.displayName }
+        val outFile = File(exportDir, "${base}_restored.$ext")
         outFile.writeBytes(raw)
         vaultFile.delete()
         entries.removeAll { it.entryId == entryId }

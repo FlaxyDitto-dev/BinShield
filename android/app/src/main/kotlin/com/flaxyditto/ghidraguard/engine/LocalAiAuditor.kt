@@ -41,7 +41,7 @@ object LocalAiAuditor {
     @Volatile
     private var cachedKey: String = ""
 
-    private const val ANDROID_SYSTEM_PROMPT = """You are an expert Android Reverse Engineer and Malware Analyst auditing static APK metadata, dangerous permissions, DEX strings, and native ELF (.so) binary sections.
+    private const val ANDROID_SYSTEM_PROMPT = """You are an expert Reverse Engineer and Malware Analyst auditing either an Android APK (permissions, DEX strings, native ELF .so sections) OR a Windows PE binary (.exe/.dll sections, Win32 APIs, entropy, strings).
 Respond ONLY with valid JSON matching this exact schema (no markdown fences, no extra prose):
 {
   "is_clean": false,

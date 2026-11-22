@@ -60,7 +60,7 @@ fun PatchLabScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "AI Decompile Audit & Surgical ELF Patch Lab",
+                    text = "AI Audit & Surgical ELF / Windows PE (.exe) Patch Lab",
                     color = TextPrimary,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,

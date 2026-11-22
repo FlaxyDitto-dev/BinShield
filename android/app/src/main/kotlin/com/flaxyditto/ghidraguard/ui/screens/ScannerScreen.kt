@@ -91,7 +91,7 @@ fun ScannerScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Android App, APK & Native ELF Scanner",
+                    text = "Android App, APK, ELF & Windows PE (.exe/.dll) Scanner",
                     color = TextPrimary,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
@@ -118,7 +118,7 @@ fun ScannerScreen(
                         onClick = { apkPicker.launch(arrayOf("*/*")) },
                         border = BorderStroke(1.dp, BorderAccent),
                     ) {
-                        Text("Inspect APK", color = BorderAccent)
+                        Text("Inspect APK / EXE", color = BorderAccent)
                     }
                 }
 
