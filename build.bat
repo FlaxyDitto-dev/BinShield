@@ -40,6 +40,13 @@ echo [*] Compiling GhidraGuard.exe with UAC Administrator manifest...
     --uac-admin ^
     --name "GhidraGuard" ^
     --collect-all customtkinter ^
+    --exclude-module torch ^
+    --exclude-module transformers ^
+    --exclude-module accelerate ^
+    --exclude-module sympy ^
+    --exclude-module numpy ^
+    --exclude-module safetensors ^
+    --exclude-module tokenizers ^
     --clean ^
     main.py
 
