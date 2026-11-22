@@ -312,7 +312,7 @@ class CUDAFlashAttentionEngine:
                 self._log("[AI] bitsandbytes not installed; loading in native bf16/fp16.")
                 load_kwargs["torch_dtype"] = dtype
         else:
-            load_kwargs["torch_dtype"] = dtype
+            load_kwargs["dtype"] = dtype
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         try:
@@ -370,16 +370,7 @@ class CUDAFlashAttentionEngine:
         }
 
         with torch.inference_mode():
-            if self._active_device == "cuda" and self.flash_attention and self._active_attn_impl == "sdpa":
-                try:
-                    from torch.nn.attention import SDPBackend, sdpa_kernel  # type: ignore
-
-                    with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
-                        out_ids = self._model.generate(**inputs, **gen_kwargs)
-                except Exception:
-                    out_ids = self._model.generate(**inputs, **gen_kwargs)
-            else:
-                out_ids = self._model.generate(**inputs, **gen_kwargs)
+            out_ids = self._model.generate(**inputs, **gen_kwargs)
 
         elapsed = max(0.001, time.perf_counter() - t0)
         new_tokens = out_ids[0][input_len:]

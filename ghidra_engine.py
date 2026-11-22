@@ -98,15 +98,20 @@ public class GhidraGuardExport extends GhidraScript {
             "entry", "main", "_main", "wmain", "winmain", "wwinmain", "dllmain",
             "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "puts", "putchar",
             "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset", "strlen", "strcmp",
-            "wndproc", "dialogproc", "defwindowproca", "defwindowprocw", "atexit", "_atexit"
+            "wndproc", "dialogproc", "defwindowproca", "defwindowprocw", "atexit", "_atexit",
+            "pre_c_init", "pre_cpp_init", "mark_section_writable", "_matherr",
+            "_pei386_runtime_relocator", "__main", "_fpreset", "_cexit", "_amsg_exit"
         };
         for (String e : exact) {
             if (low.equals(e)) return true;
         }
         String[] prefixes = {
-            "__mingw_", "___mingw_", "__crt", "_crt", "__security_", "___chkstk",
+            "__mingw_", "___mingw_", "__mingwthr_", "__w64_", "__do_global_", "__dyn_tls_",
+            "__report_", "_pei386_", "__crt", "_crt", "__security_", "___chkstk",
             "__tmaincrt", "maincrtstartup", "winmaincrtstartup", "_initterm",
-            "__p_", "_acrt_", "mingw_", "std::", "qt_", "wx", "gtk_", "tk_", "tcl_",
+            "__p_", "_acrt_", "mingw_", "__cxa_", "_unwind_", "__gcc_", "_gnu_",
+            "__getmainargs", "__lconv_", "__set_app_type", "_set_invalid_parameter",
+            "std::", "qt_", "wx", "gtk_", "tk_", "tcl_",
             "imgui", "sdl_", "glfw", "createwindow", "showwindow", "updatewindow",
             "dispatchmessage", "translatemessage", "getmessage", "peekmessage", "messagebox"
         };
