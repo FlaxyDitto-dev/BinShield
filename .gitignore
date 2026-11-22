@@ -1,0 +1,22 @@
+# Never publish test mocks or compiled binaries
+test_samples/
+*.exe
+*.dll
+*.bak
+*.ggquar
+
+# Python / PyInstaller artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+.pytest_cache/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

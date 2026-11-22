@@ -1,0 +1,7 @@
+customtkinter>=5.2.2
+psutil>=6.0.0
+pefile>=2024.8.26
+requests>=2.32.0
+pyinstaller>=6.10.0
+# Optional enhanced PE manipulation (app uses pefile seamlessly if LIEF wheel is unavailable)
+# lief>=0.15.0
