@@ -1,0 +1,11 @@
+# Optional Native PyTorch CUDA + Flash Attention Backend for GhidraGuard
+# Install PyTorch CUDA first (adjust cu128/cu126 for your CUDA driver):
+#   pip install --index-url https://download.pytorch.org/whl/cu128 torch
+# Then install these packages:
+transformers>=4.48.0
+accelerate>=1.2.0
+safetensors>=0.4.5
+# Optional 4-bit NF4 quantization (for 7B+ models on 8-12GB GPUs):
+# bitsandbytes>=0.45.0
+# Optional FlashAttention-2 kernel (PyTorch native SDPA Flash Attention works out of the box if omitted):
+# flash-attn>=2.7.0

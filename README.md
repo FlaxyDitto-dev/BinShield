@@ -1,13 +1,16 @@
-# GhidraGuard (`v0.1.0-beta.1` — Extremely Early Beta)
+# GhidraGuard (`v0.2.0-beta.1` — CUDA + Flash Attention & Android Edition)
 
-> **Built on November 21, 2026 using Gemini 4 Neon.**
+> **Built on November 21–22, 2026 using Gemini 4 Neon.**
 >
-> **Status:** Extremely Early Beta (`v0.1.0-beta.1`). Intended for local reverse engineering research, malware triage, and defensive binary-patching experiments. Always test on isolated copies and review diffs before deploying patched binaries.
+> **Status:** Early Beta (`v0.2.0-beta.1`). Intended for local reverse engineering research, malware triage, and defensive binary-patching experiments. Always test on isolated copies and review diffs before deploying patched binaries.
 
-**GhidraGuard** is a **100% free, local, offline** Windows desktop security, reverse-engineering, and AI-assisted binary-patching application written in Python (`CustomTkinter`) and packaged into a standalone Administrator-elevated Windows executable (`GhidraGuard.exe`) via `PyInstaller`.
+**GhidraGuard** is a **100% free, local, offline** security, reverse-engineering, and AI-assisted binary-patching suite — available for **Windows Desktop** (Python `CustomTkinter` + Ghidra Headless + CUDA & Flash Attention) and **Android** (native Kotlin + Jetpack Compose in [`android/`](android/)).
 
-- **Zero Cloud / Zero Cost:** Strictly enforces localhost-only LLM endpoints (`http://localhost:11434` for Ollama or an OpenAI-compatible local `llama.cpp` server).
-- **Auto-Installs a Compact Local Model (< 4 GB):** Automatically pulls `qwen2.5-coder:3b` (~1.84 GB Q4, runs smoothly even on CPU-only PCs) if local Ollama has no models installed.
+- **Zero Ollama / Zero External Server / Zero Cloud:** Directly loads and runs local AI models **in-process** — PyTorch CUDA + Flash Attention on Windows Desktop, and Google MediaPipe `LlmInference` (Mobile GPU / CPU, zero `INTERNET` permission) on Android.
+- **Direct CUDA & Flash Attention Engine (`cuda_engine.py`):**
+  - Auto-detects NVIDIA CUDA GPUs (VRAM, CUDA version, compute capability, `bf16`, `flash_attn` FlashAttention-2, and PyTorch native CUDA SDPA Flash Attention).
+  - Loads local HuggingFace models (default `Qwen/Qwen2.5-Coder-3B-Instruct` or any local model folder) directly into VRAM using `flash_attention_2` or PyTorch `SDPBackend.FLASH_ATTENTION` in `bf16`/`fp16`/`4bit-nf4` (with automatic CPU fallback).
+- **Android Version (`android/`):** 100% offline native Kotlin + Jetpack Compose app (`com.flaxyditto.ghidraguard`, **zero `INTERNET` permission**) with direct on-device MediaPipe LLM inference (`.task` / `.litertlm` / `.bin` on Mobile GPU or CPU), built-in static analyzer fallback, installed app & APK/DEX/ELF heuristic scanning, surgical ARM64/ARMv7/x86_64 ELF `.text` patching + APK signature stripping, XOR-neutralized Quarantine Vault, and network & device posture monitor.
 - **Ghidra Headless Integration:** Automatically discovers `analyzeHeadless.bat` up to two directory levels deep under `C:\*` (`C:\<folder>\<subfolder>\support\analyzeHeadless.bat`) with manual path override.
 - **Surgical Safety Guardrails:** Hard-blocks patches targeting entrypoints (`main`/`WinMain`/`DllMain`), CRT/standard libraries (`__mingw_*`, `malloc`, `memcpy`), print/logging helpers (`printf`, `puts`), and GUI window message loops (`WndProc`, `DefWindowProc`, `BeginPaint`).
 
@@ -22,7 +25,7 @@ flowchart TD
     B -->|Deep Decompile & Patch| C["Isolated Workspace Copy"]
     C --> D["Ghidra Headless (analyzeHeadless.bat)<br/>GhidraGuardExport.java: Imports, Strings, XREFs, Pseudo-C, VAs & File Offsets"]
     D --> E["Protected-Symbol Filter<br/>Blocks CRT, Libs, stdio/printf, GUI Callbacks"]
-    E --> F["Local LLM Audit (Ollama localhost:11434 / llama.cpp)<br/>Default Auto-Installed Model: qwen2.5-coder:3b (~1.84 GB)"]
+    E --> F["Direct In-Process Local AI (PyTorch CUDA + Flash Attention)<br/>Default Model: Qwen/Qwen2.5-Coder-3B-Instruct (Zero Ollama / Zero Server)"]
     F --> G{"Local AI Verdict"}
     G -->|"0 Active Threats (CLEAN)"| H["Verified Clean Binary Ready<br/>(One-Click Deploy with .bak Backup)"]
     G -->|"Packed / Unpatchable or Pass > 5"| Q
@@ -94,23 +97,35 @@ flowchart LR
 | `main.py` | Dark-mode glassmorphic `CustomTkinter` desktop UI: Threat Scanner, AI Decompile & Patch Lab (pass-by-pass viewer + hex diff summary), Live Network Monitor, System Repair (`sfc /scannow`, `DISM`), Quarantine Vault, Settings, and Real-Time Terminal Log. |
 | `scanner.py` | Scans running processes, loaded user-space DLLs, `HKCU`/`HKLM` `Run`/`RunOnce` keys, Scheduled Tasks, and active TCP/UDP connections (`psutil`, `winreg`, `pefile`, Win32 `WinVerifyTrust`). |
 | `ghidra_engine.py` | Auto-discovers `analyzeHeadless.bat` on `C:\*`, copies targets into an isolated workspace, runs the embedded `GhidraGuardExport.java` post-script with protected-symbol filtering, and verifies PE file offsets with `pefile`. |
-| `ai_auditor.py` | Localhost-only Ollama / `llama.cpp` client with automatic `qwen2.5-coder:3b` installation, strict JSON patch parsing, CRT/print/GUI safety guardrails, and max-5-pass iterative re-verification loop. |
+| `ai_auditor.py` | Direct in-process `DirectLocalAIClient` (zero Ollama / zero HTTP server) with CUDA GPU offload, Flash Attention 32K+ context scaling, strict JSON patch parsing, CRT/print/GUI safety guardrails, and max-5-pass iterative re-verification loop. |
+| `cuda_engine.py` | NVIDIA CUDA & Flash Attention hardware detector, direct PyTorch `flash_attention_2` / SDPA Flash Attention inference engine (`bf16`/`fp16`/`4bit-nf4` + CPU fallback), local HF cache discovery, and CUDA micro-benchmark self-test. |
 | `binary_patcher.py` | Applies verified byte patches strictly inside executable PE sections, strips invalidated Authenticode signatures, recalculates PE `CheckSum`, and manages backups + XOR-neutralized Quarantine Vault. |
+| `android/` | 100% offline native Android version (Kotlin + Jetpack Compose, minSdk 26 / targetSdk 36, **zero `INTERNET` permission**): direct on-device MediaPipe `LlmInference` (Mobile GPU / CPU for `.task`/`.litertlm`/`.bin` models), built-in static analyzer fallback, installed app & APK/DEX/ELF scanner, surgical ARM64/ARMv7/x86_64 ELF `.text` patcher, XOR-neutralized Quarantine Vault, and network & device posture monitor. |
 
 ---
 
-## Quick Start & Building `GhidraGuard.exe`
+## Quick Start & Building
 
-### Prerequisites
-1. **Windows 10/11 (64-bit)** with Python 3.11–3.13.
+### Prerequisites (Windows Desktop)
+1. **Windows 10/11 (64-bit)** with Python 3.11–3.13 (and an NVIDIA CUDA GPU for Flash Attention acceleration, or CPU fallback).
 2. **Ghidra** extracted under `C:\` (up to 2 levels deep, e.g., `C:\Ghidra\ghidra_12.1.4\support\analyzeHeadless.bat`).
-3. **Ollama** running locally at `http://localhost:11434` (GhidraGuard automatically pulls `qwen2.5-coder:3b` if no models are installed) **or** a local `llama.cpp` server.
+3. **No Ollama or external LLM server required** — GhidraGuard loads local HuggingFace models (`Qwen/Qwen2.5-Coder-3B-Instruct` or any local model folder) directly in-process via PyTorch CUDA + Flash Attention.
 
-### Run from Source
+### Run from Source (Windows)
 ```powershell
 pip install -r requirements.txt
+# Install PyTorch CUDA + Transformers for direct in-process CUDA + Flash Attention inference:
+pip install --index-url https://download.pytorch.org/whl/cu128 torch
+pip install -r requirements-cuda.txt
 python main.py
 ```
+
+### Build Android Edition (`android/`)
+```powershell
+cd android
+.\gradlew.bat assembleDebug
+```
+Outputs `android\app\build\outputs\apk\debug\app-debug.apk` (bundles the native MediaPipe on-device LLM runtime with zero `INTERNET` permission).
 
 ### Compile Standalone Elevated `.exe`
 ```bat

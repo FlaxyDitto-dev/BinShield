@@ -1,8 +1,8 @@
 """
-GhidraGuard - Local AI Multi-Pass Malware Auditor & Iterative Disinfection Loop
-Connects exclusively to local LLM endpoints (Ollama http://localhost:11434 or
-OpenAI-compatible local llama.cpp server), audits Ghidra pseudo-C, parses strict
-JSON patch plans, applies byte-level patches, and iteratively re-verifies up to 5 passes.
+GhidraGuard - Direct Local AI Multi-Pass Malware Auditor & Iterative Disinfection Loop
+Loads and runs local AI models directly in-process via PyTorch CUDA + Flash Attention
+(zero Ollama, zero external HTTP server), audits Ghidra pseudo-C, parses strict JSON
+patch plans, applies byte-level patches, and iteratively re-verifies up to 5 passes.
 """
 
 from __future__ import annotations
@@ -16,19 +16,20 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlparse
-
-import requests
 
 from binary_patcher import BinaryPatcher, PatchInstruction, PatchRecord, QuarantineManager
+from cuda_engine import (
+    CUDAFlashAttentionEngine,
+    DEFAULT_LOCAL_MODEL,
+)
 from ghidra_engine import GhidraAnalysisResult, GhidraEngine
 
 
 # ---------------------------------------------------------------------------
-# Default Small Local Model (< 4GB, CPU-friendly, strong at C & JSON)
+# Default Compact Local Coding Model (Direct In-Process CUDA + Flash Attention)
 # ---------------------------------------------------------------------------
 
-DEFAULT_AUTO_MODEL = "qwen2.5-coder:3b"  # ~1.9 GB Q4_K_M on Ollama
+DEFAULT_AUTO_MODEL = DEFAULT_LOCAL_MODEL  # Qwen/Qwen2.5-Coder-3B-Instruct
 
 # Functions that must NEVER be patched (entrypoints, CRT/libs, stdio/prints, GUI frameworks)
 PROTECTED_EXACT_NAMES = {
@@ -145,21 +146,8 @@ class DisinfectionResult:
 
 
 # ---------------------------------------------------------------------------
-# Localhost Validation & JSON Parsing Helpers
+# JSON Parsing Helpers
 # ---------------------------------------------------------------------------
-
-def validate_local_endpoint(url: str) -> str:
-    """Strictly enforce local-only endpoints (100% offline / zero cloud APIs)."""
-    cleaned = url.strip().rstrip("/")
-    parsed = urlparse(cleaned)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme not in ("http", "https") or host not in ("localhost", "127.0.0.1", "::1"):
-        raise ValueError(
-            f"Blocked non-local LLM endpoint '{url}'. GhidraGuard is 100% local/offline and only "
-            f"permits localhost / 127.0.0.1 endpoints."
-        )
-    return cleaned
-
 
 def extract_json_object(text: str) -> Dict[str, Any]:
     """Robustly parse JSON from local LLM output even if wrapped in markdown fences."""
@@ -206,156 +194,70 @@ def _parse_int_hex(val: Any, default: int = -1) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Local LLM Client (Ollama & llama.cpp OpenAI-compatible)
+# Direct In-Process Local AI Client (PyTorch CUDA + Flash Attention — Zero Ollama)
 # ---------------------------------------------------------------------------
 
-class LocalLLMClient:
-    """Client for local Ollama (localhost:11434) or OpenAI-compatible llama.cpp server."""
+class DirectLocalAIClient:
+    """
+    Directly loads and runs local HuggingFace / on-disk causal LLMs in-process
+    using PyTorch CUDA + Flash Attention (or CPU fallback). No Ollama or external server.
+    """
 
     def __init__(
         self,
-        backend: str = "ollama",  # "ollama" or "llamacpp"
-        base_url: str = "http://localhost:11434",
-        model: str = "",
-        timeout: int = 180,
+        model: str = DEFAULT_LOCAL_MODEL,
+        use_cuda: bool = True,
+        flash_attention: bool = True,
+        num_ctx: int = 32768,
+        precision: str = "bf16",
+        log_callback: Optional[Callable[[str], None]] = None,
     ):
-        self.backend = backend.lower().strip()
-        self.base_url = validate_local_endpoint(base_url)
-        self.model = model
-        self.timeout = timeout
+        self.model = (model or "").strip() or DEFAULT_LOCAL_MODEL
+        self.use_cuda = use_cuda
+        self.flash_attention = flash_attention
+        self.num_ctx = max(4096, int(num_ctx or 32768))
+        self.precision = precision
+        self._log = log_callback or (lambda msg: None)
+        self._engine: Optional[CUDAFlashAttentionEngine] = None
 
     def list_models(self) -> List[str]:
-        """Discover available local models via Ollama /api/tags or llama.cpp /v1/models."""
-        if self.backend == "ollama":
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
-            models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
-            return sorted(models)
-        else:
-            resp = requests.get(f"{self.base_url}/v1/models", timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
-            models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
-            return sorted(models)
-
-    def pull_model(
-        self,
-        model_name: str = DEFAULT_AUTO_MODEL,
-        log_callback: Optional[Callable[[str], None]] = None,
-    ) -> str:
-        """Automatically pull a compact local model (< 4GB) into local Ollama."""
-        log = log_callback or (lambda msg: None)
-        if self.backend != "ollama":
-            raise RuntimeError("Automatic model pull is supported on local Ollama (http://localhost:11434).")
-
-        log(f"[AI] Auto-installing lightweight local model '{model_name}' (~1.9 GB) via Ollama...")
-        last_pct = -1
-        with requests.post(
-            f"{self.base_url}/api/pull",
-            json={"name": model_name, "stream": True},
-            stream=True,
-            timeout=900,
-        ) as resp:
-            resp.raise_for_status()
-            for raw_line in resp.iter_lines(decode_unicode=True):
-                if not raw_line:
-                    continue
-                try:
-                    ev = json.loads(raw_line)
-                except json.JSONDecodeError:
-                    continue
-                if "error" in ev:
-                    raise RuntimeError(f"Ollama pull error: {ev['error']}")
-                status = str(ev.get("status", ""))
-                total = int(ev.get("total", 0) or 0)
-                completed = int(ev.get("completed", 0) or 0)
-                if total > 0:
-                    pct = int((completed * 100) / total)
-                    if pct > last_pct and (pct >= last_pct + 10 or pct == 100):
-                        last_pct = pct
-                        mb_done = completed / (1024 * 1024)
-                        mb_tot = total / (1024 * 1024)
-                        log(f"[AI] Pulling {model_name}: {pct}% ({mb_done:.0f}/{mb_tot:.0f} MB)")
-                elif status in ("verifying sha256 digest", "writing manifest", "success"):
-                    log(f"[AI] Pulling {model_name}: {status}")
-
-        self.model = model_name
-        log(f"[AI] Local model '{model_name}' is installed and ready!")
-        return model_name
+        """List locally cached HuggingFace models and recommended compact coding models."""
+        return CUDAFlashAttentionEngine.list_local_models()
 
     def ensure_model_ready(
         self,
-        default_model: str = DEFAULT_AUTO_MODEL,
+        default_model: str = DEFAULT_LOCAL_MODEL,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """Ensure a local model is selected; auto-pull default compact model if Ollama has none."""
-        log = log_callback or (lambda msg: None)
-        models = self.list_models()
-        if self.model and self.model in models:
-            return self.model
-        if models:
-            self.model = models[0]
-            return self.model
-        if self.backend == "ollama":
-            return self.pull_model(default_model, log_callback=log)
-        raise RuntimeError(
-            f"No local models found at {self.base_url}. Start your local llama.cpp server with a model."
-        )
+        """Load the configured local AI model directly into CUDA VRAM (or CPU)."""
+        log = log_callback or self._log
+        if not self.model:
+            self.model = default_model
+        if self._engine is None or self._engine.model_id != self.model:
+            self._engine = CUDAFlashAttentionEngine(
+                model_id=self.model,
+                use_cuda=self.use_cuda,
+                precision=self.precision,
+                flash_attention=self.flash_attention,
+                log_callback=log,
+            )
+        self._engine.ensure_loaded()
+        return self.model
+
+    def unload(self) -> None:
+        if self._engine is not None:
+            self._engine.unload()
 
     def query_json(self, system_prompt: str, user_prompt: str) -> str:
-        """Send an audit prompt to the local LLM and return raw text response."""
-        if not self.model:
+        """Run direct in-process inference (CUDA + Flash Attention) and return raw text."""
+        if self._engine is None or not self._engine.is_loaded:
             self.ensure_model_ready()
+        assert self._engine is not None
+        return self._engine.generate_json(system_prompt, user_prompt)
 
-        if self.backend == "ollama":
-            payload = {
-                "model": self.model,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.1, "num_ctx": 16384},
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            }
-            resp = requests.post(
-                f"{self.base_url}/api/chat",
-                json=payload,
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return str(data.get("message", {}).get("content", ""))
-        else:
-            payload = {
-                "model": self.model,
-                "temperature": 0.1,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            }
-            resp = requests.post(
-                f"{self.base_url}/v1/chat/completions",
-                json=payload,
-                timeout=self.timeout,
-            )
-            if resp.status_code == 400:
-                # Some llama.cpp builds reject response_format; retry without it
-                payload.pop("response_format", None)
-                resp = requests.post(
-                    f"{self.base_url}/v1/chat/completions",
-                    json=payload,
-                    timeout=self.timeout,
-                )
-            resp.raise_for_status()
-            data = resp.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("llama.cpp server returned empty choices.")
-            return str(choices[0].get("message", {}).get("content", ""))
+
+# Backwards-compatible alias
+LocalLLMClient = DirectLocalAIClient
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +319,8 @@ class AIAuditorPipeline:
                 )
 
         lines.append(f"\n--- Decompiled Functions ({len(analysis.functions)}) ---")
-        char_budget = 26000
+        # Expand prompt budget when CUDA + Flash Attention enables a 32K+ context window
+        char_budget = 48000 if (self.llm.use_cuda and self.llm.flash_attention and self.llm.num_ctx >= 32768) else 26000
         used = 0
         for fn in analysis.functions:
             block = (
@@ -474,7 +377,7 @@ class AIAuditorPipeline:
         all_patches: List[PatchRecord] = []
         pass_reports: List[PassAuditReport] = []
 
-        # Ensure a local model is available (auto-installs compact <4GB model on Ollama if empty)
+        # Load the configured local AI model directly into CUDA VRAM (or CPU)
         self.llm.ensure_model_ready(log_callback=self._log)
 
         self._log(

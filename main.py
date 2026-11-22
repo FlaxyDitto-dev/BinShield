@@ -23,11 +23,18 @@ import psutil
 from ai_auditor import (
     AIAuditorPipeline,
     DEFAULT_AUTO_MODEL,
+    DirectLocalAIClient,
     DisinfectionResult,
-    LocalLLMClient,
     PassAuditReport,
 )
 from binary_patcher import BinaryPatcher, PatchRecord, QuarantineEntry, QuarantineManager
+from cuda_engine import (
+    CUDAFlashAttentionEngine,
+    DEFAULT_LOCAL_MODEL,
+    GPUHardwareInfo,
+    detect_cuda_hardware,
+    run_cuda_flash_benchmark,
+)
 from ghidra_engine import GhidraEngine, discover_ghidra_headless
 from scanner import (
     NetworkConnectionInfo,
@@ -83,9 +90,11 @@ class SettingsStore:
         self.path = base / "settings.json"
         self.data: Dict[str, Any] = {
             "ghidra_headless_path": "",
-            "llm_backend": "ollama",
-            "llm_endpoint": "http://localhost:11434",
-            "llm_model": "",
+            "llm_model": DEFAULT_LOCAL_MODEL,
+            "use_cuda": True,
+            "flash_attention": True,
+            "cuda_precision": "bf16",
+            "num_ctx": 32768,
             "max_passes": 5,
             "ghidra_timeout": 300,
             "auto_quarantine": True,
@@ -119,12 +128,13 @@ class GhidraGuardApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.title("GhidraGuard v0.1.0-beta.1 — Local Reverse Engineering & AI Binary Patcher")
+        self.title("GhidraGuard v0.2.0-beta.1 — CUDA + Flash Attention Local RE & AI Binary Patcher")
         self.geometry("1360x860")
         self.minsize(1120, 720)
         self.configure(fg_color=BG_ROOT)
 
         self.settings = SettingsStore()
+        self.gpu_info: GPUHardwareInfo = detect_cuda_hardware()
         self.quarantine_mgr = QuarantineManager(log_callback=self.log)
         self.scanner = SystemScanner(log_callback=self.log)
         self.patcher = BinaryPatcher(log_callback=self.log)
@@ -146,6 +156,7 @@ class GhidraGuardApp(ctk.CTk):
         self.findings: List[ThreatFinding] = []
         self.active_target_path: str = ""
         self.active_pipeline: Optional[AIAuditorPipeline] = None
+        self.direct_ai_client: Optional[DirectLocalAIClient] = None
         self.last_result: Optional[DisinfectionResult] = None
         self.pass_reports: List[PassAuditReport] = []
         self.net_auto_refresh = False
@@ -156,7 +167,16 @@ class GhidraGuardApp(ctk.CTk):
 
         self._build_layout()
         self._show_view("scanner")
-        self.log("[SYSTEM] GhidraGuard initialized (100% Local / Offline Mode).")
+        self.log("[SYSTEM] GhidraGuard v0.2.0 initialized (100% Local / Offline Mode).")
+        if self.gpu_info.cuda_available:
+            self.log(
+                f"[CUDA] Detected {self.gpu_info.gpu_name} ({self.gpu_info.vram_total_gb} GB VRAM, "
+                f"CUDA {self.gpu_info.cuda_version or 'N/A'}) | "
+                f"FlashAttn={'Ready' if self.gpu_info.supports_flash_attention else 'Unavailable'} | "
+                f"Backend={self.gpu_info.recommended_attn_backend}"
+            )
+        else:
+            self.log("[CUDA] No NVIDIA CUDA GPU detected — running in CPU fallback mode.")
         if self.ghidra_engine.is_available():
             self.log(f"[GHIDRA] Detected: {self.ghidra_engine.headless_path}")
         else:
@@ -242,7 +262,15 @@ class GhidraGuardApp(ctk.CTk):
             font=ctk.CTkFont(size=11),
             text_color=TEXT_SECONDARY,
         )
-        self.lbl_ai_status.pack(anchor="w", padx=12, pady=(2, 10))
+        self.lbl_ai_status.pack(anchor="w", padx=12, pady=2)
+
+        self.lbl_cuda_status = ctk.CTkLabel(
+            status_box,
+            text=self.gpu_info.short_badge(),
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=BORDER_ACCENT if self.gpu_info.cuda_available else TEXT_MUTED,
+        )
+        self.lbl_cuda_status.pack(anchor="w", padx=12, pady=(2, 10))
 
         # Main Content Container
         self.content_container = ctk.CTkFrame(self, fg_color=BG_ROOT, corner_radius=0)
@@ -746,7 +774,7 @@ class GhidraGuardApp(ctk.CTk):
             "Select a suspicious .exe or .dll and click 'Start Iterative Disinfection'.\n\n"
             "Pipeline per pass (max 5 passes):\n"
             "  1. Copy binary to isolated workspace & run Ghidra Headless (GhidraGuardExport.java)\n"
-            "  2. Send decompiled pseudo-C, imports, strings & XREFs to local Ollama / llama.cpp\n"
+            "  2. Audit decompiled pseudo-C, imports, strings & XREFs directly with local CUDA + Flash Attention AI\n"
             "  3. Parse strict JSON patch plan & apply surgical .text patches (RET / NOP / Jcc flip)\n"
             "  4. Strip invalidated Authenticode signature & recalculate PE CheckSum\n"
             "  5. Re-decompile patched binary & re-verify until 0 malicious behaviors remain.\n",
@@ -813,11 +841,17 @@ class GhidraGuardApp(ctk.CTk):
         self._set_textbox(self.audit_viewer, "Starting Pass 1 headless decompilation...\n")
         self._set_textbox(self.diff_box, "Awaiting patches...\n")
 
-        llm_client = LocalLLMClient(
-            backend=self.settings.data.get("llm_backend", "ollama"),
-            base_url=self.settings.data.get("llm_endpoint", "http://localhost:11434"),
-            model=self.settings.data.get("llm_model", ""),
-        )
+        model_id = self.settings.data.get("llm_model", "") or DEFAULT_LOCAL_MODEL
+        if self.direct_ai_client is None or self.direct_ai_client.model != model_id:
+            self.direct_ai_client = DirectLocalAIClient(
+                model=model_id,
+                use_cuda=bool(self.settings.data.get("use_cuda", True)),
+                flash_attention=bool(self.settings.data.get("flash_attention", True)),
+                num_ctx=int(self.settings.data.get("num_ctx", 32768)),
+                precision=str(self.settings.data.get("cuda_precision", "bf16")),
+                log_callback=self.log,
+            )
+        llm_client = self.direct_ai_client
         self.active_pipeline = AIAuditorPipeline(
             ghidra=self.ghidra_engine,
             llm=llm_client,
@@ -1311,54 +1345,126 @@ class GhidraGuardApp(ctk.CTk):
             command=self._auto_detect_ghidra,
         ).pack(side="left", padx=4)
 
-        # --- Local LLM Section ---
+        # --- Direct Local AI Model Section (Zero Ollama / Zero External Server) ---
         ai_card = ctk.CTkFrame(frame, fg_color=BG_CARD_ALT, corner_radius=12, border_width=1, border_color=BORDER_GLASS)
         ai_card.pack(fill="x", padx=18, pady=8)
 
         ctk.CTkLabel(
-            ai_card, text="Local LLM Backend (Zero-Cost / Localhost Only)", font=ctk.CTkFont(size=14, weight="bold"),
+            ai_card,
+            text="Direct Local AI Model (In-Process CUDA + Flash Attention — No Ollama Required)",
+            font=ctk.CTkFont(size=14, weight="bold"),
             text_color=BORDER_ACCENT,
         ).pack(anchor="w", padx=14, pady=(12, 8))
 
-        b_row = ctk.CTkFrame(ai_card, fg_color="transparent")
-        b_row.pack(fill="x", padx=14, pady=4)
-        ctk.CTkLabel(b_row, text="Backend:", width=110, anchor="w").pack(side="left")
-        self.opt_backend = ctk.CTkOptionMenu(
-            b_row,
-            values=["ollama", "llamacpp"],
-            command=self._on_backend_change,
-        )
-        self.opt_backend.set(self.settings.data.get("llm_backend", "ollama"))
-        self.opt_backend.pack(side="left", padx=(0, 14))
-
-        ctk.CTkLabel(b_row, text="Local Endpoint:", width=105, anchor="w").pack(side="left")
-        self.ent_endpoint = ctk.CTkEntry(b_row, width=260, fg_color=BG_INPUT, border_color=BORDER_GLASS)
-        self.ent_endpoint.insert(0, self.settings.data.get("llm_endpoint", "http://localhost:11434"))
-        self.ent_endpoint.pack(side="left", padx=(0, 8))
-
         m_row = ctk.CTkFrame(ai_card, fg_color="transparent")
-        m_row.pack(fill="x", padx=14, pady=(6, 14))
-        ctk.CTkLabel(m_row, text="Local Model:", width=110, anchor="w").pack(side="left")
-        cur_model = self.settings.data.get("llm_model", "") or "(click Refresh Models)"
-        self.opt_model = ctk.CTkOptionMenu(m_row, values=[cur_model], width=280)
+        m_row.pack(fill="x", padx=14, pady=(2, 8))
+        ctk.CTkLabel(m_row, text="Model ID / Path:", width=115, anchor="w").pack(side="left")
+        cached_models = CUDAFlashAttentionEngine.list_local_models()
+        cur_model = self.settings.data.get("llm_model", "") or DEFAULT_LOCAL_MODEL
+        if cur_model not in cached_models:
+            cached_models.insert(0, cur_model)
+        self.opt_model = ctk.CTkOptionMenu(m_row, values=cached_models, width=320)
         self.opt_model.set(cur_model)
-        self.opt_model.pack(side="left", padx=(0, 10))
+        self.opt_model.pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(
             m_row,
-            text="Refresh Models",
-            width=125,
-            fg_color=ACCENT_CYAN,
-            hover_color=ACCENT_CYAN_HOVER,
-            command=lambda: self._refresh_models_async(silent=False),
+            text="Browse Local Folder...",
+            width=145,
+            fg_color=BG_CARD,
+            hover_color=BORDER_GLASS,
+            command=self._browse_local_model_dir,
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(
             m_row,
-            text=f"Install {DEFAULT_AUTO_MODEL} (~1.9GB)",
+            text="Scan Cache",
+            width=100,
+            fg_color=ACCENT_CYAN,
+            hover_color=ACCENT_CYAN_HOVER,
+            command=lambda: self._refresh_models_async(silent=False),
+        ).pack(side="left")
+
+        m_row2 = ctk.CTkFrame(ai_card, fg_color="transparent")
+        m_row2.pack(fill="x", padx=14, pady=(0, 14))
+        ctk.CTkButton(
+            m_row2,
+            text="Preload / Download Model to VRAM",
             fg_color=ACCENT_PURPLE,
             hover_color="#7C3AED",
-            command=self._install_default_model_async,
+            command=self._preload_model_async,
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(
+            m_row2,
+            text="Unload VRAM",
+            width=110,
+            fg_color="#334155",
+            hover_color="#475569",
+            command=self._unload_model_vram,
+        ).pack(side="left")
+
+        # --- CUDA & Flash Attention Acceleration Card ---
+        cuda_card = ctk.CTkFrame(frame, fg_color=BG_CARD_ALT, corner_radius=12, border_width=1, border_color=BORDER_GLASS)
+        cuda_card.pack(fill="x", padx=18, pady=8)
+
+        ctk.CTkLabel(
+            cuda_card,
+            text="CUDA GPU & Flash Attention Acceleration",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=BORDER_ACCENT,
+        ).pack(anchor="w", padx=14, pady=(12, 4))
+
+        hw = self.gpu_info
+        hw_summary = (
+            f"GPU: {hw.gpu_name} | VRAM: {hw.vram_total_gb} GB | CUDA: {hw.cuda_version or 'N/A'} | "
+            f"PyTorch CUDA: {'Yes' if hw.torch_cuda_available else 'No'} | "
+            f"FlashAttn-2: {'Yes' if hw.flash_attn_2_available else 'PyTorch SDPA'}"
+        )
+        self.lbl_cuda_hw_details = ctk.CTkLabel(
+            cuda_card,
+            text=hw_summary,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            text_color=ACCENT_GREEN if hw.cuda_available else TEXT_MUTED,
+            anchor="w",
+        )
+        self.lbl_cuda_hw_details.pack(fill="x", padx=14, pady=(0, 8))
+
+        c_row1 = ctk.CTkFrame(cuda_card, fg_color="transparent")
+        c_row1.pack(fill="x", padx=14, pady=4)
+
+        self.var_use_cuda = tk.BooleanVar(value=bool(self.settings.data.get("use_cuda", True)))
+        ctk.CTkCheckBox(
+            c_row1,
+            text="Enable CUDA GPU Acceleration (device_map='cuda')",
+            variable=self.var_use_cuda,
+        ).pack(side="left", padx=(0, 18))
+
+        self.var_flash_attn = tk.BooleanVar(value=bool(self.settings.data.get("flash_attention", True)))
+        ctk.CTkCheckBox(
+            c_row1,
+            text="Enable Flash Attention (FlashAttention-2 / PyTorch SDPA)",
+            variable=self.var_flash_attn,
+        ).pack(side="left")
+
+        c_row2 = ctk.CTkFrame(cuda_card, fg_color="transparent")
+        c_row2.pack(fill="x", padx=14, pady=(6, 14))
+
+        ctk.CTkLabel(c_row2, text="Precision:", width=75, anchor="w").pack(side="left")
+        self.opt_precision = ctk.CTkOptionMenu(c_row2, values=["bf16", "fp16", "4bit-nf4"], width=110)
+        self.opt_precision.set(str(self.settings.data.get("cuda_precision", "bf16")))
+        self.opt_precision.pack(side="left", padx=(0, 16))
+
+        ctk.CTkLabel(c_row2, text="Context Window:", width=110, anchor="w").pack(side="left")
+        self.opt_num_ctx = ctk.CTkOptionMenu(c_row2, values=["16384", "32768", "65536"], width=100)
+        self.opt_num_ctx.set(str(self.settings.data.get("num_ctx", 32768)))
+        self.opt_num_ctx.pack(side="left", padx=(0, 16))
+
+        ctk.CTkButton(
+            c_row2,
+            text="Run CUDA FlashAttn Self-Test",
+            fg_color=ACCENT_CYAN,
+            hover_color=ACCENT_CYAN_HOVER,
+            command=self._run_cuda_self_test_async,
         ).pack(side="left")
 
         # --- Safety Loop Settings ---
@@ -1398,12 +1504,59 @@ class GhidraGuardApp(ctk.CTk):
 
         return frame
 
-    def _on_backend_change(self, backend: str) -> None:
-        self.ent_endpoint.delete(0, "end")
-        if backend == "ollama":
-            self.ent_endpoint.insert(0, "http://localhost:11434")
-        else:
-            self.ent_endpoint.insert(0, "http://localhost:8080")
+    def _browse_local_model_dir(self) -> None:
+        folder = filedialog.askdirectory(title="Select Local HuggingFace / Safetensors Model Folder")
+        if folder:
+            vals = list(self.opt_model.cget("values"))
+            if folder not in vals:
+                vals.insert(0, folder)
+                self.opt_model.configure(values=vals)
+            self.opt_model.set(folder)
+            self.log(f"[AI] Selected local model directory: {folder}")
+
+    def _run_cuda_self_test_async(self) -> None:
+        self.log("[CUDA] Running direct CUDA & Flash Attention self-test...")
+
+        def _worker() -> None:
+            res = run_cuda_flash_benchmark()
+            msg = res.get("message", "Self-test completed.")
+            self.log(f"[CUDA] {msg}")
+            self.after(0, lambda m=msg: messagebox.showinfo("CUDA & Flash Attention Self-Test", m))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _preload_model_async(self) -> None:
+        self._save_settings()
+        model_id = self.settings.data.get("llm_model", "") or DEFAULT_LOCAL_MODEL
+        self.lbl_ai_status.configure(text="Local AI: Loading...", text_color=ACCENT_AMBER)
+
+        def _worker() -> None:
+            try:
+                client = DirectLocalAIClient(
+                    model=model_id,
+                    use_cuda=bool(self.settings.data.get("use_cuda", True)),
+                    flash_attention=bool(self.settings.data.get("flash_attention", True)),
+                    num_ctx=int(self.settings.data.get("num_ctx", 32768)),
+                    precision=str(self.settings.data.get("cuda_precision", "bf16")),
+                    log_callback=self.log,
+                )
+                client.ensure_model_ready()
+                self.direct_ai_client = client
+                short = Path(model_id).name[:20]
+                self.after(0, lambda s=short: self.lbl_ai_status.configure(text=f"Local AI: {s}", text_color=ACCENT_GREEN))
+            except Exception as exc:
+                self.log(f"[AI] Model load failed: {exc}")
+                self.after(0, lambda: self.lbl_ai_status.configure(text="Local AI: Load Failed", text_color=ACCENT_RED))
+                self.after(0, lambda e=exc: messagebox.showerror("Direct Model Load Failed", str(e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _unload_model_vram(self) -> None:
+        if self.direct_ai_client is not None:
+            self.direct_ai_client.unload()
+            self.direct_ai_client = None
+            self.log("[CUDA] Unloaded local AI model from VRAM.")
+            self.lbl_ai_status.configure(text="Local AI: Standby", text_color=TEXT_SECONDARY)
 
     def _browse_ghidra(self) -> None:
         path = filedialog.askopenfilename(
@@ -1429,90 +1582,37 @@ class GhidraGuardApp(ctk.CTk):
                 "Could not find analyzeHeadless.bat within 2 levels of C:\\.\nPlease use Browse to select it manually.",
             )
 
-    def _refresh_models_async(self, silent: bool = False, auto_install: bool = True) -> None:
-        backend = self.opt_backend.get() if hasattr(self, "opt_backend") else self.settings.data.get("llm_backend", "ollama")
-        endpoint = self.ent_endpoint.get().strip() if hasattr(self, "ent_endpoint") else self.settings.data.get("llm_endpoint", "http://localhost:11434")
-
+    def _refresh_models_async(self, silent: bool = False) -> None:
         def _worker() -> None:
-            try:
-                client = LocalLLMClient(backend=backend, base_url=endpoint)
-                models = client.list_models()
-                if not models and auto_install and backend == "ollama":
-                    self.after(
-                        0,
-                        lambda: self.lbl_ai_status.configure(
-                            text=f"Local AI: Installing {DEFAULT_AUTO_MODEL}...", text_color=ACCENT_AMBER
-                        ),
-                    )
-                    client.pull_model(DEFAULT_AUTO_MODEL, log_callback=self.log)
-                    models = client.list_models()
+            models = CUDAFlashAttentionEngine.list_local_models()
+            saved = self.settings.data.get("llm_model", "") or DEFAULT_LOCAL_MODEL
+            if saved not in models:
+                models.insert(0, saved)
 
-                if models:
-                    def _apply() -> None:
-                        self.opt_model.configure(values=models)
-                        saved = self.settings.data.get("llm_model", "")
-                        chosen = saved if saved in models else models[0]
-                        self.opt_model.set(chosen)
-                        self.settings.data["llm_model"] = chosen
-                        self.settings.save()
-                        self.lbl_ai_status.configure(text=f"Local AI: {chosen[:20]}", text_color=ACCENT_GREEN)
-                    self.after(0, _apply)
-                    if not silent:
-                        self.log(f"[AI] Discovered {len(models)} local model(s) from {endpoint}.")
-                else:
-                    self.after(0, lambda: self.lbl_ai_status.configure(text="Local AI: No models", text_color=ACCENT_AMBER))
-            except Exception as exc:
-                self.after(0, lambda: self.lbl_ai_status.configure(text="Local AI: Offline", text_color=ACCENT_RED))
-                if not silent:
-                    self.log(f"[AI] Could not reach {endpoint}: {exc}")
+            def _apply() -> None:
+                self.opt_model.configure(values=models)
+                self.opt_model.set(saved)
+                short = Path(saved).name[:20]
+                self.lbl_ai_status.configure(text=f"Local AI: {short}", text_color=ACCENT_GREEN)
 
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _install_default_model_async(self) -> None:
-        backend = self.opt_backend.get().strip()
-        endpoint = self.ent_endpoint.get().strip()
-        if backend != "ollama":
-            messagebox.showinfo("Ollama Required", "Automatic model download is available for local Ollama endpoints.")
-            return
-
-        def _worker() -> None:
-            try:
-                self.after(
-                    0,
-                    lambda: self.lbl_ai_status.configure(
-                        text=f"Local AI: Installing {DEFAULT_AUTO_MODEL}...", text_color=ACCENT_AMBER
-                    ),
-                )
-                client = LocalLLMClient(backend="ollama", base_url=endpoint)
-                client.pull_model(DEFAULT_AUTO_MODEL, log_callback=self.log)
-                self._refresh_models_async(silent=False, auto_install=False)
-            except Exception as exc:
-                self.log(f"[AI] Auto-install failed: {exc}")
-                self.after(0, lambda: self.lbl_ai_status.configure(text="Local AI: Pull Failed", text_color=ACCENT_RED))
+            self.after(0, _apply)
+            if not silent:
+                self.log(f"[AI] Discovered {len(models)} direct local model(s) in cache.")
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _save_settings(self) -> None:
         ghidra_path = self.ent_ghidra.get().strip()
-        backend = self.opt_backend.get().strip()
-        endpoint = self.ent_endpoint.get().strip()
-        model = self.opt_model.get().strip()
-        if model.startswith("("):
-            model = ""
-
-        # Enforce localhost-only before saving
-        try:
-            LocalLLMClient(backend=backend, base_url=endpoint)
-        except ValueError as exc:
-            messagebox.showerror("Invalid Local Endpoint", str(exc))
-            return
+        model = self.opt_model.get().strip() or DEFAULT_LOCAL_MODEL
 
         self.settings.data.update(
             {
                 "ghidra_headless_path": ghidra_path,
-                "llm_backend": backend,
-                "llm_endpoint": endpoint,
                 "llm_model": model,
+                "use_cuda": bool(self.var_use_cuda.get()),
+                "flash_attention": bool(self.var_flash_attn.get()),
+                "cuda_precision": self.opt_precision.get().strip(),
+                "num_ctx": int(self.opt_num_ctx.get()),
                 "max_passes": int(self.opt_passes.get()),
                 "auto_quarantine": bool(self.var_auto_quar.get()),
             }
@@ -1525,7 +1625,9 @@ class GhidraGuardApp(ctk.CTk):
             text=f"Ghidra: {'Ready' if ok else 'Not Found'}",
             text_color=ACCENT_GREEN if ok else ACCENT_RED,
         )
-        self.log("[SETTINGS] Configuration saved.")
+        short = Path(model).name[:20]
+        self.lbl_ai_status.configure(text=f"Local AI: {short}", text_color=ACCENT_GREEN)
+        self.log("[SETTINGS] Direct local AI & CUDA Flash Attention configuration saved.")
 
     @staticmethod
     def _set_textbox(widget: ctk.CTkTextbox, text: str) -> None:
