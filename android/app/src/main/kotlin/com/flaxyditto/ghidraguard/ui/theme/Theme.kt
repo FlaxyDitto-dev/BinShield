@@ -10,7 +10,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Exact GhidraGuard Dark Glassmorphic Palette (matching desktop CustomTkinter app)
+// Exact BinShield Dark Glassmorphic Palette (matching desktop CustomTkinter app)
 val BgRoot = Color(0xFF090D16)
 val BgSidebar = Color(0xFF0E1422)
 val BgCard = Color(0xFF121A2B)
@@ -34,7 +34,7 @@ fun severityColor(severity: String): Color = when (severity.uppercase()) {
     else -> Color(0xFF22C55E)
 }
 
-private val GhidraGuardDarkColors = darkColorScheme(
+private val BinShieldDarkColors = darkColorScheme(
     primary = AccentCyan,
     onPrimary = BgRoot,
     secondary = AccentPurple,
@@ -50,7 +50,7 @@ private val GhidraGuardDarkColors = darkColorScheme(
     error = AccentRed,
 )
 
-private val GhidraGuardTypography = Typography(
+private val BinShieldTypography = Typography(
     headlineSmall = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 20.sp,
@@ -75,8 +75,8 @@ private val GhidraGuardTypography = Typography(
 @Composable
 fun GhidraGuardTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = GhidraGuardDarkColors,
-        typography = GhidraGuardTypography,
+        colorScheme = BinShieldDarkColors,
+        typography = BinShieldTypography,
         content = content,
     )
 }

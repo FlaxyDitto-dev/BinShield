@@ -15,7 +15,7 @@ class GhidraGuardEngineTest {
 
     @Test
     fun verifyRealWindowsPeAnalysisAndSurgicalPatching() {
-        val sample = File("C:\\Users\\johna\\.gemini\\antigravity\\scratch\\GhidraGuard\\test_samples\\mock_threat_sample.exe")
+        val sample = File("C:\\Users\\johna\\.gemini\\antigravity\\scratch\\BinShield\\test_samples\\mock_threat_sample.exe")
         if (!sample.isFile) {
             println("Skipping external sample test (mock_threat_sample.exe not present)")
             return
@@ -65,7 +65,7 @@ class GhidraGuardEngineTest {
 
     @Test
     fun verifyRealApkAndNativeElfInspection() {
-        val apk = File("C:\\Users\\johna\\.gemini\\antigravity\\scratch\\GhidraGuard\\GhidraGuard-v0.2.0-direct-ai.apk")
+        val apk = File("C:\\Users\\johna\\.gemini\\antigravity\\scratch\\BinShield\\BinShield-v0.2.0-direct-ai.apk")
         if (!apk.isFile) {
             println("Skipping real APK test (APK not built yet)")
             return

@@ -1,5 +1,5 @@
 """
-GhidraGuard - Cross-Platform Android APK (.apk) Analyzer, Sanitizer & Integrity Verifier
+BinShield - Cross-Platform Android APK (.apk) Analyzer, Sanitizer & Integrity Verifier
 100% offline, zero external dependencies (pure Python stdlib: zipfile, struct, hashlib, zlib).
 Parses binary AXML AndroidManifest.xml, DEX headers/checksums/strings, native ELF (.so)
 libraries (ARM64, ARMv7, x86, x86_64), and assets/ droppers; surgically strips or patches

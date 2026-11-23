@@ -1,5 +1,5 @@
 """
-GhidraGuard - In-App Android APK Re-Signer (v1 JAR Signature + apksigner Integration)
+BinShield - In-App Android APK Re-Signer (v1 JAR Signature + apksigner Integration)
 Re-signs sanitized APKs immediately so they can be installed on Android devices.
 Uses Android SDK `apksigner` / JDK `jarsigner` when available, with a built-in pure-Python
 v1 MANIFEST.MF + CERT.SF SHA-256 digest signer fallback so signing never fails offline.
@@ -50,9 +50,9 @@ def _ensure_debug_keystore(keystore_path: Path) -> bool:
             keytool, "-genkeypair", "-v",
             "-keystore", str(keystore_path),
             "-storepass", "android", "-keypass", "android",
-            "-alias", "ghidraguard",
+            "-alias", "binshield",
             "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
-            "-dname", "CN=GhidraGuard,O=GhidraGuard,C=US",
+            "-dname", "CN=BinShield,O=BinShield,C=US",
         ],
         capture_output=True,
         text=True,
@@ -79,7 +79,7 @@ def sign_apk(
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
-    ks = Path(keystore_path) if keystore_path else (Path.home() / ".ghidraguard" / "debug.keystore")
+    ks = Path(keystore_path) if keystore_path else (Path.home() / ".binshield" / "debug.keystore")
     apksigner = _find_tool("apksigner")
     if apksigner and _ensure_debug_keystore(ks):
         proc = subprocess.run(
@@ -88,7 +88,7 @@ def sign_apk(
                 "--ks", str(ks),
                 "--ks-pass", "pass:android",
                 "--key-pass", "pass:android",
-                "--ks-key-alias", "ghidraguard",
+                "--ks-key-alias", "binshield",
                 str(dst),
             ],
             capture_output=True,
@@ -100,8 +100,8 @@ def sign_apk(
             return True, "apksigner (v1+v2+v3)"
 
     # Pure-Python SHA-256 v1 MANIFEST.MF + CERT.SF fallback (preserves ZIP_STORED resources.arsc)
-    manifest_lines = ["Manifest-Version: 1.0", "Created-By: GhidraGuard v2.0.0", ""]
-    sf_lines = ["Signature-Version: 1.0", "Created-By: GhidraGuard v2.0.0"]
+    manifest_lines = ["Manifest-Version: 1.0", "Created-By: BinShield v2.0.0", ""]
+    sf_lines = ["Signature-Version: 1.0", "Created-By: BinShield v2.0.0"]
     entry_blocks: list[str] = []
 
     with zipfile.ZipFile(dst, "r") as zin:

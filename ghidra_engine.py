@@ -1,5 +1,5 @@
 r"""
-GhidraGuard - Ghidra Headless Auto-Discovery & Decompilation Bridge
+BinShield - Ghidra Headless Auto-Discovery & Decompilation Bridge
 Scans C:\ (up to 2 directory levels deep) for analyzeHeadless.bat, copies targets
 into an isolated workspace, runs a self-contained Java Ghidra post-script, and
 returns structured pseudo-C, symbol, string, XREF, VA, and PE file-offset metadata.
@@ -24,8 +24,8 @@ import pefile
 # Embedded Ghidra Headless Post-Script (Java - Works on ALL Ghidra Versions)
 # ---------------------------------------------------------------------------
 
-GHIDRA_EXPORT_JAVA = r'''// GhidraGuardExport.java - Headless export of imports, strings, XREFs, and pseudo-C
-// @category GhidraGuard
+GHIDRA_EXPORT_JAVA = r'''// BinShieldExport.java - Headless export of imports, strings, XREFs, and pseudo-C
+// @category BinShield
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
@@ -59,7 +59,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-public class GhidraGuardExport extends GhidraScript {
+public class BinShieldExport extends GhidraScript {
 
     private static final Set<String> SUSPICIOUS_APIS = new HashSet<>(Arrays.asList(
         "setwindowshookexa", "setwindowshookexw", "getasynckeystate", "getkeystate",
@@ -345,7 +345,7 @@ public class GhidraGuardExport extends GhidraScript {
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(outFile))) {
             bw.write(sb.toString());
         }
-        println("[GhidraGuardExport] Wrote analysis JSON to: " + outputPath);
+        println("[BinShieldExport] Wrote analysis JSON to: " + outputPath);
     }
 
     private long getFileOffset(Address addr) {
@@ -509,7 +509,7 @@ class GhidraEngine:
 
         base_dir = workspace_root or os.path.join(
             os.environ.get("LOCALAPPDATA", tempfile.gettempdir()),
-            "GhidraGuard",
+            "BinShield",
             "workspaces",
         )
         self.workspace_root = Path(base_dir)
@@ -529,14 +529,14 @@ class GhidraEngine:
         return bool(self.headless_path and os.path.isfile(self.headless_path))
 
     def _ensure_export_script(self) -> Path:
-        script_file = self.script_dir / "GhidraGuardExport.java"
+        script_file = self.script_dir / "BinShieldExport.java"
         script_file.write_text(GHIDRA_EXPORT_JAVA, encoding="utf-8")
         return script_file
 
     def analyze_binary(self, binary_path: str, pass_index: int = 1) -> GhidraAnalysisResult:
         """
         Copy target binary into an isolated workspace and run analyzeHeadless.bat
-        with GhidraGuardExport.java to extract symbols, imports, strings, XREFs, and pseudo-C.
+        with BinShieldExport.java to extract symbols, imports, strings, XREFs, and pseudo-C.
         """
         if not self.is_available():
             raise FileNotFoundError(
@@ -566,7 +566,7 @@ class GhidraEngine:
             "-import", str(isolated_bin),
             "-overwrite",
             "-scriptPath", str(self.script_dir),
-            "-postScript", "GhidraGuardExport.java", str(output_json),
+            "-postScript", "BinShieldExport.java", str(output_json),
             "-deleteProject",
         ]
 
@@ -588,7 +588,7 @@ class GhidraEngine:
             for line in proc.stdout:
                 clean = line.strip()
                 if clean and any(
-                    k in clean for k in ("INFO", "ERROR", "WARN", "GhidraGuardExport", "ANALYZING", "IMPORTING")
+                    k in clean for k in ("INFO", "ERROR", "WARN", "BinShieldExport", "ANALYZING", "IMPORTING")
                 ):
                     self._log(f"[GHIDRA] {clean[:180]}")
                 if self.timeout_seconds > 0 and (time.time() - start > self.timeout_seconds):

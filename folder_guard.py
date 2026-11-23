@@ -1,5 +1,5 @@
 """
-GhidraGuard - Real-Time Folder & Download Guard
+BinShield - Real-Time Folder & Download Guard
 Cross-platform background directory watcher (Windows, Linux, macOS) that monitors
 Downloads, Temp, AppData, or custom game/app folders and automatically scans
 newly dropped or modified .exe, .dll, .apk, .so, .elf, and .dylib binaries.

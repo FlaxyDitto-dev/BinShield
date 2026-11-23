@@ -1,5 +1,5 @@
 """
-GhidraGuard v2.0.0 - Comprehensive Integration Test Suite for All 10 Major & Feature Upgrades
+BinShield v2.0.0 - Comprehensive Integration Test Suite for All 10 Major & Feature Upgrades
 Tests:
   1. Real-Time Folder Guard (watch & auto-scan dropped files)
   2. Linux ELF & macOS Mach-O analysis, sanitization, and integrity verification
@@ -8,7 +8,7 @@ Tests:
   5. SHA-256 Rollback Manager & Patch Byte Diff Generator
   6. Direct Capstone Disassembler & UPX Auto-Unpacker detector
   7. Dynamic Sandbox Runner (Windows Job Object / isolated temp dir execution)
-  8. GhidraGuard-SecNet-v2 INT8 ONNX + PyTorch CUDA inference (0% FP on clean apps, 100% threats)
+  8. BinShield-SecNet-v2 INT8 ONNX + PyTorch CUDA inference (0% FP on clean apps, 100% threats)
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from apk_engine import analyze_apk_file, sanitize_apk, verify_apk_integrity
 from apk_signer import sign_apk
-from custom_model import GhidraGuardSecNetClient, format_scan_for_ai
+from custom_model import BinShieldSecNetClient, format_scan_for_ai
 from disasm_unpacker import disassemble_pe_entrypoint, is_upx_packed
 from folder_guard import FolderGuard
 from rollback_manager import RollbackManager, generate_patch_diff
@@ -158,8 +158,8 @@ def main() -> None:
         assert sbx.completed and not sbx.crashed and sbx.exit_code == 0 and "Hello v2!" in sbx.stdout_preview
         print(f"[PASS] 7. Dynamic Sandbox Runner ({sbx.verdict}, stdout={sbx.stdout_preview!r})")
 
-        # 8. GhidraGuard-SecNet-v2 INT8 ONNX + PyTorch CUDA Verification
-        ai_ort = GhidraGuardSecNetClient(device="onnx", log_callback=print)
+        # 8. BinShield-SecNet-v2 INT8 ONNX + PyTorch CUDA Verification
+        ai_ort = BinShieldSecNetClient(device="onnx", log_callback=print)
         f_clean = analyze_pe_file(str(hexe))
         dc = asdict(f_clean); dc["type"] = "pe"
         r_clean = ai_ort.predict(format_scan_for_ai(dc))
@@ -170,9 +170,9 @@ def main() -> None:
         assert not r_asm_clean["is_malicious"], f"Clean asm FP: {r_asm_clean}"
         assert r_asm_mal["is_malicious"], f"Malicious asm FN: {r_asm_mal}"
         assert r_macho_mal["is_malicious"], f"Malicious Mach-O FN: {r_macho_mal}"
-        print(f"[PASS] 8. GhidraGuard-SecNet-v2 INT8 ONNX ({r_clean['device']}: clean=CLN, asm_shellcode=MAL, macho_dylib=MAL)")
+        print(f"[PASS] 8. BinShield-SecNet-v2 INT8 ONNX ({r_clean['device']}: clean=CLN, asm_shellcode=MAL, macho_dylib=MAL)")
 
-        print("\nALL 8/8 GHIDRAGUARD v2.0.0 FEATURE & MAJOR UPGRADE TESTS PASSED 100%!")
+        print("\nALL 8/8 BINSHIELD v2.0.0 FEATURE & MAJOR UPGRADE TESTS PASSED 100%!")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

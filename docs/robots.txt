@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://flaxyditto-dev.github.io/BinShield/sitemap.xml

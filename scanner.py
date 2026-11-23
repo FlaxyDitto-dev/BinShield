@@ -1,5 +1,5 @@
 """
-GhidraGuard - System, Process, DLL, Registry, Scheduled Task & PE Heuristic Scanner
+BinShield - System, Process, DLL, Registry, Scheduled Task & PE Heuristic Scanner
 100% local/offline Windows security scanner using psutil, winreg, pefile, and Win32 APIs.
 """
 

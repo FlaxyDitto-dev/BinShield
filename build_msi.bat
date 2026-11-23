@@ -2,20 +2,20 @@
 setlocal
 cd /d "%~dp0"
 echo ============================================================
-echo   GhidraGuard Windows MSI Installer Builder (WiX v4)
+echo   BinShield Windows MSI Installer Builder (WiX v4)
 echo ============================================================
-if not exist "dist\GhidraGuard-GUI.exe" (
-    echo [!] dist\GhidraGuard-GUI.exe not found. Run build.bat first.
+if not exist "dist\BinShield-GUI.exe" (
+    echo [!] dist\BinShield-GUI.exe not found. Run build.bat first.
     exit /b 1
 )
-if not exist "dist\GhidraGuard-CLI.exe" (
-    echo [!] dist\GhidraGuard-CLI.exe not found. Run build.bat first.
+if not exist "dist\BinShield-CLI.exe" (
+    echo [!] dist\BinShield-CLI.exe not found. Run build.bat first.
     exit /b 1
 )
-wix build installer\GhidraGuard.wxs -arch x64 -o dist\GhidraGuard-v2.1.1-Setup-x64.msi
+wix build installer\BinShield.wxs -arch x64 -o dist\BinShield-v3.0.0-Setup-x64.msi
 if errorlevel 1 (
     echo [!] WiX MSI build failed.
     exit /b 1
 )
-echo [+] Created Windows Installer: dist\GhidraGuard-v2.1.1-Setup-x64.msi
+echo [+] Created Windows Installer: dist\BinShield-v3.0.0-Setup-x64.msi
 endlocal

@@ -1,5 +1,5 @@
 """
-GhidraGuard - Custom Trained AI Model (GhidraGuard-SecNet-v1)
+BinShield - Custom Trained AI Model (BinShield-SecNet-v1)
 Universal Multi-Accelerator Runtime: GPU (NVIDIA CUDA, AMD ROCm, Intel XPU/Arc, Apple MPS, DirectML),
 NPU (Intel OpenVINO NPU, Qualcomm QNN Snapdragon NPU, Apple CoreML Neural Engine, Android NNAPI),
 and Universal CPU (ONNX Runtime or PyTorch).
@@ -22,12 +22,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-MODEL_NAME = "GhidraGuard-SecNet-v2"
-MODEL_RELEASE_TAG = "v2.0.0"
-MODEL_REPO = "FlaxyDitto-dev/GhidraGuard"
-MODEL_WEIGHTS_FILENAME = "GhidraGuard-SecNet-v2.safetensors"
-MODEL_ONNX_FILENAME = "GhidraGuard-SecNet-v2-int8.onnx"
-MODEL_VOCAB_FILENAME = "GhidraGuard-SecNet-v2-vocab.json"
+MODEL_NAME = "BinShield-SecNet-v2"
+MODEL_RELEASE_TAG = "v3.0.0"
+MODEL_REPO = "FlaxyDitto-dev/BinShield"
+MODEL_WEIGHTS_FILENAME = "BinShield-SecNet-v2.safetensors"
+MODEL_ONNX_FILENAME = "BinShield-SecNet-v2-int8.onnx"
+MODEL_VOCAB_FILENAME = "BinShield-SecNet-v2-vocab.json"
 
 MODEL_WEIGHTS_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_WEIGHTS_FILENAME}"
 MODEL_ONNX_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_ONNX_FILENAME}"
@@ -117,14 +117,14 @@ def format_scan_for_ai(static_res: Dict[str, Any], filename: str = "") -> str:
 
 def get_default_model_dir() -> Path:
     """Cross-platform model cache directory (Windows, Linux, macOS, Google Colab)."""
-    env_dir = os.environ.get("GHIDRAGUARD_MODEL_DIR")
+    env_dir = os.environ.get("BINSHIELD_MODEL_DIR")
     if env_dir:
         p = Path(env_dir)
     elif os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-        p = Path(base) / "GhidraGuard" / "models" / MODEL_NAME
+        p = Path(base) / "BinShield" / "models" / MODEL_NAME
     else:
-        p = Path.home() / ".ghidraguard" / "models" / MODEL_NAME
+        p = Path.home() / ".binshield" / "models" / MODEL_NAME
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -249,11 +249,11 @@ def _build_secnet_module(
     num_categories: int = len(THREAT_CATEGORIES),
     num_strategies: int = len(PATCH_STRATEGIES),
 ):
-    """Construct the PyTorch GhidraGuardSecNet Transformer module lazily."""
+    """Construct the PyTorch BinShieldSecNet Transformer module lazily."""
     import torch
     import torch.nn as nn
 
-    class GhidraGuardSecNet(nn.Module):
+    class BinShieldSecNet(nn.Module):
         def __init__(self) -> None:
             super().__init__()
             self.token_emb = nn.Embedding(vocab_size, d_model, padding_idx=0)
@@ -286,7 +286,7 @@ def _build_secnet_module(
             strat_logits = self.strategy_head(cls_h)
             return mal_logit, cat_logits, strat_logits
 
-    return GhidraGuardSecNet()
+    return BinShieldSecNet()
 
 
 def _download_file(
@@ -297,7 +297,7 @@ def _download_file(
     log = log_callback or (lambda msg: None)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    req = urllib.request.Request(url, headers={"User-Agent": "GhidraGuard/1.1.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "BinShield/1.1.1"})
     log(f"[MODEL] Downloading {dest.name} from fast GitHub CDN...")
     with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as out:
         while True:
@@ -316,7 +316,7 @@ def ensure_custom_model_files(
     log_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Path, Path]:
     """
-    Locate preinstalled GhidraGuard-SecNet-v2 weights (.onnx or .safetensors) + vocab
+    Locate preinstalled BinShield-SecNet-v2 weights (.onnx or .safetensors) + vocab
     (bundled inside PyInstaller _MEIPASS, MSI install folder, or repo models/),
     falling back to fast GitHub Releases CDN auto-download only if not preinstalled.
     """
@@ -361,9 +361,9 @@ def _softmax(vals: List[float]) -> List[float]:
     return [e / s for e in exps]
 
 
-class GhidraGuardSecNetClient:
+class BinShieldSecNetClient:
     """
-    Universal multi-accelerator inference client for GhidraGuard-SecNet-v1.
+    Universal multi-accelerator inference client for BinShield-SecNet-v1.
     Supports:
       - device="auto" : best available (NVIDIA CUDA / AMD ROCm / Intel XPU / NPU / DirectML / CoreML / MPS / CPU)
       - device="gpu"  : CUDA / ROCm / DirectML / XPU / MPS

@@ -1,5 +1,5 @@
 """
-GhidraGuard - Cross-Platform Auto-Updater (Windows, Linux, macOS, Google Colab)
+BinShield - Cross-Platform Auto-Updater (Windows, Linux, macOS, Google Colab)
 Queries GitHub Releases API (Fastly Global CDN) for the latest SemVer release,
 compares against APP_VERSION, and downloads the platform-matched binary/update.
 
@@ -7,7 +7,7 @@ Behavior by variant:
 - Desktop GUI (Windows / Linux / macOS): checks automatically on startup in background.
 - Google Colab: auto-updates repo & custom model on notebook run.
 - Android: checks automatically via UpdateChecker.kt.
-- CLI: NEVER auto-updates on normal commands; requires explicit `ghidraguard update`.
+- CLI: NEVER auto-updates on normal commands; requires explicit `binshield update`.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-APP_VERSION = "2.1.1"
-GITHUB_REPO = "FlaxyDitto-dev/GhidraGuard"
+APP_VERSION = "3.0.0"
+GITHUB_REPO = "FlaxyDitto-dev/BinShield"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
@@ -64,11 +64,11 @@ def _pick_asset_for_platform(assets: list, variant: str = "gui") -> Tuple[str, s
 
     preferred: list[str] = []
     if sys_name == "windows":
-        preferred = ["ghidraguard-cli.exe"] if want_cli else ["ghidraguard-gui.exe", "ghidraguard.exe"]
+        preferred = ["binshield-cli.exe"] if want_cli else ["binshield-gui.exe", "binshield.exe"]
     elif sys_name == "linux":
-        preferred = ["ghidraguard-cli-linux", "ghidraguard-linux-cli"] if want_cli else ["ghidraguard-gui-linux", "ghidraguard-linux-gui"]
+        preferred = ["binshield-cli-linux", "binshield-linux-cli"] if want_cli else ["binshield-gui-linux", "binshield-linux-gui"]
     elif sys_name == "darwin":
-        preferred = ["ghidraguard-cli-macos", "ghidraguard-macos-cli"] if want_cli else ["ghidraguard-gui-macos", "ghidraguard-macos-gui"]
+        preferred = ["binshield-cli-macos", "binshield-macos-cli"] if want_cli else ["binshield-gui-macos", "binshield-macos-gui"]
 
     for pref in preferred:
         for a in assets:
@@ -102,7 +102,7 @@ def check_for_updates(variant: str = "gui", timeout: int = 10) -> UpdateCheckRes
         req = urllib.request.Request(
             RELEASES_API_URL,
             headers={
-                "User-Agent": f"GhidraGuard/{APP_VERSION}",
+                "User-Agent": f"BinShield/{APP_VERSION}",
                 "Accept": "application/vnd.github+json",
             },
         )
@@ -145,13 +145,13 @@ def download_update(
             f"Download source from: {result.release_url}"
         )
 
-    out_dir = dest_dir or (Path(tempfile.gettempdir()) / "GhidraGuard_Updates")
+    out_dir = dest_dir or (Path(tempfile.gettempdir()) / "BinShield_Updates")
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / result.asset_name
     tmp = dest.with_suffix(dest.suffix + ".part")
 
     log(f"[UPDATE] Downloading {result.asset_name} (v{result.latest_version})...")
-    req = urllib.request.Request(result.asset_url, headers={"User-Agent": f"GhidraGuard/{APP_VERSION}"})
+    req = urllib.request.Request(result.asset_url, headers={"User-Agent": f"BinShield/{APP_VERSION}"})
     with urllib.request.urlopen(req, timeout=180) as resp, open(tmp, "wb") as out:
         while True:
             chunk = resp.read(256 * 1024)

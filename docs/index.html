@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BinShield — Offline AI Binary Malware Scanner, Disinfector &amp; WebAssembly Patcher</title>
+  <meta name="description" content="Scan, analyze, and surgically disinfect Windows PE (.exe/.dll), Linux ELF, macOS Mach-O, and Android APK binaries directly in your browser using Rust WebAssembly and the BinShield-SecNet-v2 INT8 ONNX AI model — 100% client-side, zero uploads." />
+  <meta name="keywords" content="BinShield, malware scanner, WebAssembly malware analyzer, binary patcher, PE analyzer, ELF scanner, APK analyzer, ONNX AI security, YARA browser scanner, offline antivirus, reverse engineering, GhidraGuard" />
+  <meta name="author" content="FlaxyDitto-dev" />
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
+  <link rel="canonical" href="https://flaxyditto-dev.github.io/BinShield/" />
+
+  <!-- Open Graph / Social -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="BinShield" />
+  <meta property="og:title" content="BinShield — Offline AI Binary Scanner &amp; WebAssembly Patcher" />
+  <meta property="og:description" content="100% client-side WebAssembly binary malware scanner, YARA engine, SecNet-v2 ONNX AI auditor, and surgical hex patcher. Works in your browser or as a Windows .msi / Linux / macOS / Android app." />
+  <meta property="og:url" content="https://flaxyditto-dev.github.io/BinShield/" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="BinShield — Offline AI Binary Scanner &amp; WebAssembly Patcher" />
+  <meta name="twitter:description" content="Analyze &amp; disinfect PE, ELF, Mach-O, and APK binaries in your browser with Rust WebAssembly + BinShield-SecNet-v2 ONNX AI. Zero file uploads." />
+
+  <!-- Structured Data (JSON-LD) for Search Engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "BinShield",
+    "alternateName": "GhidraGuard",
+    "applicationCategory": "SecurityApplication",
+    "operatingSystem": "WebAssembly (Browser), Windows, Linux, macOS, Android",
+    "softwareVersion": "3.0.0",
+    "url": "https://flaxyditto-dev.github.io/BinShield/",
+    "downloadUrl": "https://github.com/FlaxyDitto-dev/BinShield/releases/latest",
+    "codeRepository": "https://github.com/FlaxyDitto-dev/BinShield",
+    "license": "https://opensource.org/licenses/MIT",
+    "description": "Cross-platform offline AI binary malware scanner, YARA engine, and surgical disinfector/patcher powered by Rust WebAssembly and the 13.9M-parameter BinShield-SecNet-v2 INT8 ONNX model.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "featureList": [
+      "100% Client-Side Rust WebAssembly Binary Parser (PE, ELF, Mach-O, APK)",
+      "In-Browser BinShield-SecNet-v2 INT8 ONNX Neural Network Inference",
+      "Built-in YARA Signature & Shannon Entropy Detection",
+      "Surgical In-Memory Binary Patcher & Sanitized Download",
+      "Windows .msi Installer with Prebuilt Python & Preinstalled AI Model"
+    ]
+  }
+  </script>
+
+  <link rel="stylesheet" href="./styles.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-badge">BS</div>
+        <span>BinShield <small style="color:var(--muted);font-weight:500">v3.0.0 WASM</small></span>
+      </div>
+      <nav class="nav-links" aria-label="Primary Navigation">
+        <a href="#app">WebAssembly Scanner</a>
+        <a href="#downloads">Desktop &amp; Mobile Apps</a>
+        <a href="https://github.com/FlaxyDitto-dev/BinShield" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn" href="https://github.com/FlaxyDitto-dev/BinShield/releases/latest" target="_blank" rel="noopener" style="padding:7px 14px;font-size:0.85rem">Download v3.0.0</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <span class="pill">100% Client-Side WebAssembly • Zero File Uploads • Offline AI</span>
+      <h1>Analyze &amp; Surgically Disinfect Binaries Right in Your Browser</h1>
+      <p class="lead">
+        <strong>BinShield</strong> combines a compiled <strong>Rust WebAssembly</strong> binary engine with our custom
+        <strong>BinShield-SecNet-v2 (13.9M-param INT8 ONNX)</strong> AI model running directly inside your browser —
+        no installation required, and your files never leave your device.
+      </p>
+      <div class="status-bar">
+        <div class="status-chip"><span id="wasm-dot" class="dot"></span><span id="wasm-status">Initializing Rust WASM Core...</span></div>
+        <div class="status-chip"><span id="ai-dot" class="dot"></span><span id="ai-status">Initializing SecNet-v2 ONNX WASM...</span></div>
+        <div class="status-chip"><span class="dot ok"></span><span>Privacy: 100% Local Execution</span></div>
+      </div>
+    </section>
+
+    <section id="app">
+      <div class="tabs" role="tablist">
+        <button class="tab-btn active" data-tab="tab-scanner" role="tab">1. WASM Scanner &amp; AI Verdict</button>
+        <button class="tab-btn" data-tab="tab-details" role="tab">2. Sections, Entropy &amp; YARA</button>
+        <button class="tab-btn" data-tab="tab-patcher" role="tab">3. Surgical Hex Patcher</button>
+        <button class="tab-btn" data-tab="tab-auditor" role="tab">4. AI Code / Disassembly Auditor</button>
+      </div>
+
+      <!-- TAB 1: SCANNER -->
+      <div id="tab-scanner" class="tab-panel active">
+        <div class="card">
+          <div id="dropzone" class="dropzone">
+            <input id="file-input" type="file" />
+            <h2 style="margin-bottom:6px">Drop any .exe, .dll, .elf, .so, .dylib, .apk, or .bin file here</h2>
+            <p style="color:var(--muted);margin-top:0">Analyzed locally in WebAssembly memory. Nothing is uploaded to any server.</p>
+            <div class="btn-row">
+              <button type="button" class="btn">Choose Binary File</button>
+              <button type="button" id="btn-demo-clean" class="btn secondary">Try Demo: Clean Binary</button>
+              <button type="button" id="btn-demo-malware" class="btn danger">Try Demo: Simulated Keylogger</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="results-container" style="display:none">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div>
+                <h2 id="res-filename" style="margin-bottom:4px">—</h2>
+                <div id="res-meta" style="color:var(--muted);font-size:0.9rem">—</div>
+                <div style="margin-top:6px;font-size:0.82rem;color:var(--muted)">SHA-256: <span id="res-sha256" class="mono"></span></div>
+              </div>
+              <button id="btn-download-patched" class="btn ok" disabled>Download Current Binary</button>
+            </div>
+
+            <div class="grid-2" style="margin-top:16px">
+              <div class="metric-box">
+                <div class="metric-label">Rust WASM Static + YARA Risk Score</div>
+                <div id="res-score" class="metric-val">—</div>
+              </div>
+              <div class="metric-box">
+                <div class="metric-label">BinShield-SecNet-v2 AI Verdict (ONNX WASM)</div>
+                <div id="res-ai-verdict" class="metric-val">—</div>
+                <div id="res-ai-strategy" style="font-size:0.84rem;color:var(--muted);margin-top:4px">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <h3>Detected Threat Indicators</h3>
+              <div id="res-indicators"></div>
+            </div>
+            <div class="card">
+              <h3>Suspicious APIs &amp; Capabilities</h3>
+              <div id="res-apis"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: SECTIONS & YARA -->
+      <div id="tab-details" class="tab-panel">
+        <div class="card">
+          <h3>YARA Signature Matches</h3>
+          <table>
+            <thead><tr><th>Rule</th><th>Severity</th><th>Offset</th><th>Description</th></tr></thead>
+            <tbody id="res-yara"><tr><td colspan="4" style="color:var(--muted)">Scan a binary first to view YARA matches.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h3>PE / ELF Sections &amp; Shannon Entropy</h3>
+          <table>
+            <thead><tr><th>Section</th><th>Virtual Addr</th><th>Raw Offset</th><th>Raw Size</th><th>Entropy</th><th>Flags</th></tr></thead>
+            <tbody id="res-sections"><tr><td colspan="6" style="color:var(--muted)">Scan a binary first to inspect sections.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 3: SURGICAL PATCHER -->
+      <div id="tab-patcher" class="tab-panel">
+        <div class="card">
+          <h3>Automatic Recommended Disinfection Targets</h3>
+          <div id="patch-candidates" style="color:var(--muted)">Scan a binary first to generate surgical patch targets.</div>
+        </div>
+        <div class="card">
+          <h3>Manual Surgical Offset Patcher (In-Memory WASM)</h3>
+          <div class="grid-3">
+            <div>
+              <label for="manual-offset" class="metric-label">File Offset (Hex or Dec)</label>
+              <input id="manual-offset" type="text" value="0x90" />
+            </div>
+            <div>
+              <label for="manual-strategy" class="metric-label">Patch Strategy</label>
+              <select id="manual-strategy">
+                <option value="0">RET_ZERO (31 C0 C3 — xor eax, eax; ret)</option>
+                <option value="1">RET_ONE (B8 01 00 00 00 C3 — mov eax, 1; ret)</option>
+                <option value="2">RET_EARLY (C3 — ret)</option>
+                <option value="3">NOP_SLED (90 ... — overwrite bytes with NOP)</option>
+              </select>
+            </div>
+            <div>
+              <label for="manual-len" class="metric-label">NOP Length (for NOP_SLED)</label>
+              <input id="manual-len" type="number" value="8" min="1" max="64" />
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <button id="btn-apply-manual-patch" class="btn">Apply Surgical Patch in WASM</button>
+          </div>
+          <h4 style="margin-top:18px;margin-bottom:8px">Byte Diff &amp; SHA-256 Audit Log</h4>
+          <div id="patch-diff-log" class="hex-diff">No patches applied yet.</div>
+        </div>
+      </div>
+
+      <!-- TAB 4: AI CODE AUDITOR -->
+      <div id="tab-auditor" class="tab-panel">
+        <div class="card">
+          <h3>BinShield-SecNet-v2 Pseudo-C &amp; Disassembly Auditor (ONNX WASM)</h3>
+          <p style="color:var(--muted);margin-top:0">Paste decompiled Pseudo-C, x86/x64, or ARM64 assembly to classify threats and recommend a surgical patch strategy directly in WebAssembly.</p>
+          <textarea id="code-input" rows="7">FUNC inject_remote_thread
+HHOOK h = SetWindowsHookExA(13, hook_proc, NULL, 0);
+LPVOID mem = VirtualAllocEx(hProc, NULL, 4096, 0x3000, 0x40);
+WriteProcessMemory(hProc, mem, shellcode, 256, NULL);
+CreateRemoteThread(hProc, NULL, 0, mem, NULL, 0, NULL);</textarea>
+          <div style="margin-top:12px">
+            <button id="btn-audit-code" class="btn">Audit with SecNet-v2 (WASM)</button>
+          </div>
+          <pre id="code-audit-out" class="hex-diff" style="margin-top:14px">Click "Audit with SecNet-v2 (WASM)" to run neural inference locally.</pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="downloads" style="margin-top:34px">
+      <h2>Need Full Desktop / System Protection? Download BinShield</h2>
+      <p style="color:var(--muted)">The native apps add Real-Time Folder Guard, UPX Auto-Unpacking, Capstone Disassembly, Isolated Sandbox Execution, In-App APK Re-Signing, and SHA-256 Rollback Vault.</p>
+      <div class="grid-3">
+        <div class="card">
+          <h3>Windows Installer (.msi)</h3>
+          <p style="color:var(--muted)">Includes prebuilt Python 3.13 runtime, preinstalled <code>BinShield-SecNet-v2</code> AI model, GUI + CLI, Desktop &amp; Start Menu shortcuts, and <code>PATH</code> integration.</p>
+          <a class="btn" href="https://github.com/FlaxyDitto-dev/BinShield/releases/latest" target="_blank" rel="noopener">Download .msi Installer</a>
+        </div>
+        <div class="card">
+          <h3>Standalone Windows / Linux / macOS</h3>
+          <p style="color:var(--muted)">Zero-dependency portable GUI &amp; CLI executables for Windows x64, Linux x86_64, and macOS (Apple Silicon &amp; Intel) with built-in YARA &amp; ONNX AI.</p>
+          <a class="btn secondary" href="https://github.com/FlaxyDitto-dev/BinShield/releases/latest" target="_blank" rel="noopener">View All Releases</a>
+        </div>
+        <div class="card">
+          <h3>Android &amp; Google Colab</h3>
+          <p style="color:var(--muted)">Scan &amp; sanitize APKs and native libraries on Android, or run GPU-accelerated batch audits in Google Colab.</p>
+          <a class="btn secondary" href="https://github.com/FlaxyDitto-dev/BinShield" target="_blank" rel="noopener">Open Repository</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <strong>BinShield</strong> (formerly GhidraGuard) — Open-Source Offline AI Binary Security Suite •
+      <a href="https://github.com/FlaxyDitto-dev/BinShield">GitHub</a> •
+      <a href="./sitemap.xml">Sitemap</a>
+    </div>
+  </footer>
+</body>
+</html>

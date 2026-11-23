@@ -1,5 +1,5 @@
 """
-GhidraGuard - Direct Ghidra-Free Disassembler (Capstone) & UPX Auto-Unpacker
+BinShield - Direct Ghidra-Free Disassembler (Capstone) & UPX Auto-Unpacker
 Disassembles x86/x64/ARM64/ARMv7 machine code directly in milliseconds without requiring
 Ghidra Headless, and automatically detects & unpacks UPX-packed binaries before sanitization.
 """

@@ -1,12 +1,12 @@
 """
-GhidraGuard - Automatic Environment & Dependency Bootstrapper
-Automatically detects, downloads, and configures everything GhidraGuard needs:
+BinShield - Automatic Environment & Dependency Bootstrapper
+Automatically detects, downloads, and configures everything BinShield needs:
   1. Java JDK 21+ (portable Eclipse Temurin JDK 21 if missing)
-  2. NSA Ghidra (latest official GitHub release ZIP extracted to C:\\Ghidra or %LOCALAPPDATA%\\GhidraGuard\\tools)
+  2. NSA Ghidra (latest official GitHub release ZIP extracted to C:\\Ghidra or %LOCALAPPDATA%\\BinShield\\tools)
   3. Direct PyTorch CUDA + Flash Attention + Transformers (torch cu128/cpu, transformers, accelerate, safetensors)
   4. Default local AI model preload (Qwen/Qwen2.5-Coder-3B-Instruct)
 
-Can be invoked directly from the GhidraGuard GUI ("Auto-Setup Everything") or via CLI:
+Can be invoked directly from the BinShield GUI ("Auto-Setup Everything") or via CLI:
     python auto_setup.py
 """
 
@@ -62,7 +62,7 @@ class EnvironmentStatus:
 
 
 def _tools_root() -> Path:
-    """Prefer C:\\Ghidra if writable, else %LOCALAPPDATA%\\GhidraGuard\\tools."""
+    """Prefer C:\\Ghidra if writable, else %LOCALAPPDATA%\\BinShield\\tools."""
     preferred = Path("C:\\Ghidra")
     try:
         preferred.mkdir(parents=True, exist_ok=True)
@@ -71,7 +71,7 @@ def _tools_root() -> Path:
         probe.unlink(missing_ok=True)
         return preferred
     except Exception:
-        fallback = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "GhidraGuard" / "tools"
+        fallback = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "BinShield" / "tools"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
 
@@ -95,10 +95,10 @@ def detect_java_21_plus() -> Tuple[bool, str, str]:
     if env_jh:
         candidates.append((os.path.join(env_jh, "bin", "java.exe"), env_jh))
 
-    # Check portable JDKs in C:\Ghidra and %LOCALAPPDATA%\GhidraGuard\tools
+    # Check portable JDKs in C:\Ghidra and %LOCALAPPDATA%\BinShield\tools
     for root in (
         Path("C:\\Ghidra"),
-        Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "GhidraGuard" / "tools",
+        Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "BinShield" / "tools",
         Path("C:\\Program Files\\Java"),
     ):
         if root.is_dir():
@@ -130,9 +130,9 @@ def detect_java_21_plus() -> Tuple[bool, str, str]:
 
 
 def discover_all_ghidra_paths() -> List[str]:
-    """Search C:\\ (2 levels) plus %LOCALAPPDATA%\\GhidraGuard\\tools for analyzeHeadless.bat."""
+    """Search C:\\ (2 levels) plus %LOCALAPPDATA%\\BinShield\\tools for analyzeHeadless.bat."""
     found = discover_ghidra_headless("C:\\")
-    tools_dir = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "GhidraGuard" / "tools"
+    tools_dir = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "BinShield" / "tools"
     if tools_dir.is_dir():
         for child in sorted(tools_dir.iterdir(), reverse=True):
             cand = child / "support" / "analyzeHeadless.bat"
@@ -178,7 +178,7 @@ def _download_file(
     label: str,
 ) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "GhidraGuard-AutoSetup/0.2"})
+    req = urllib.request.Request(url, headers={"User-Agent": "BinShield-AutoSetup/0.2"})
     last_pct = -1
     with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
         total = int(resp.headers.get("Content-Length", "0") or "0")
@@ -237,7 +237,7 @@ def ensure_ghidra(log: Callable[[str], None]) -> str:
     log("[SETUP] Querying official NSA Ghidra latest release from GitHub...")
     req = urllib.request.Request(
         GHIDRA_RELEASES_API,
-        headers={"User-Agent": "GhidraGuard-AutoSetup/0.2", "Accept": "application/vnd.github+json"},
+        headers={"User-Agent": "BinShield-AutoSetup/0.2", "Accept": "application/vnd.github+json"},
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         rel = json.loads(resp.read().decode("utf-8"))
@@ -323,14 +323,14 @@ def run_full_auto_setup(
     log_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, str]:
     """
-    One-click automatic setup for everything GhidraGuard needs:
+    One-click automatic setup for everything BinShield needs:
       1. Portable Java JDK 21+ (if missing)
       2. Official NSA Ghidra (if missing)
       3. Direct PyTorch CUDA + Flash Attention + Transformers stack (if missing)
       4. Optional local AI model preload into cache/VRAM
     """
     log = log_callback or print
-    log("[SETUP] === Starting GhidraGuard Automatic Full Setup ===")
+    log("[SETUP] === Starting BinShield Automatic Full Setup ===")
     results: Dict[str, str] = {}
 
     java_home = ensure_java_21(log)

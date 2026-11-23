@@ -1,4 +1,4 @@
-# Optional Native PyTorch CUDA + Flash Attention Backend for GhidraGuard
+# Optional Native PyTorch CUDA + Flash Attention Backend for BinShield
 # Install PyTorch CUDA first (adjust cu128/cu126 for your CUDA driver):
 #   pip install --index-url https://download.pytorch.org/whl/cu128 torch
 # Then install these packages:

@@ -21,7 +21,7 @@ data class AndroidQuarantineEntry(
 )
 
 /**
- * XOR-Neutralized Quarantine Vault matching desktop GhidraGuard (0x5A XOR on first 4KB).
+ * XOR-Neutralized Quarantine Vault matching desktop BinShield (0x5A XOR on first 4KB).
  * Stores neutralized APK/ELF artifacts inside app-private filesDir/quarantine.
  */
 class QuarantineVault(context: Context) {

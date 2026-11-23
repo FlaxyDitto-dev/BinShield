@@ -30,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class GhidraGuardUiState(
+data class BinShieldUiState(
     val selectedTab: Int = 0,
     // Scanner
     val isScanning: Boolean = false,
@@ -66,11 +66,11 @@ class GhidraGuardViewModel(application: Application) : AndroidViewModel(applicat
     private val prefs = application.getSharedPreferences("ghidraguard_prefs", Context.MODE_PRIVATE)
     private val vault = QuarantineVault(application)
 
-    private val _uiState = MutableStateFlow(GhidraGuardUiState(aiConfig = loadConfig()))
-    val uiState: StateFlow<GhidraGuardUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(BinShieldUiState(aiConfig = loadConfig()))
+    val uiState: StateFlow<BinShieldUiState> = _uiState.asStateFlow()
 
     init {
-        log("[SYSTEM] GhidraGuard Android v0.2.0 initialized (100% Offline • Direct On-Device AI).")
+        log("[SYSTEM] BinShield Android v0.2.0 initialized (100% Offline • Direct On-Device AI).")
         refreshLocalModels()
         refreshNetworkAndPosture()
         refreshVault()

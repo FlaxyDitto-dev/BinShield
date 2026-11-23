@@ -30,4 +30,4 @@ android/local.properties
 *.aab
 
 # Trained custom model weights (hosted on GitHub Releases CDN for fast auto-download)
-models/
+/models/

@@ -1,5 +1,5 @@
 """
-GhidraGuard - Local Offline Windows Security, Ghidra Decompiler & AI Binary Patching Suite
+BinShield - Local Offline Windows Security, Ghidra Decompiler & AI Binary Patching Suite
 Dark-mode glassmorphic desktop UI built with CustomTkinter.
 """
 
@@ -92,13 +92,13 @@ def is_admin() -> bool:
 
 
 class SettingsStore:
-    """Persists local GhidraGuard settings across Windows, Linux, and macOS."""
+    """Persists local BinShield settings across Windows, Linux, and macOS."""
 
     def __init__(self) -> None:
         if os.name == "nt":
-            base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "GhidraGuard"
+            base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "BinShield"
         else:
-            base = Path.home() / ".ghidraguard"
+            base = Path.home() / ".binshield"
         base.mkdir(parents=True, exist_ok=True)
         self.path = base / "settings.json"
         self.data: Dict[str, Any] = {
@@ -123,7 +123,7 @@ class SettingsStore:
                     self.data.update(loaded)
             except Exception:
                 pass
-        # Auto-migrate old HuggingFace models to preinstalled GhidraGuard-SecNet-v2
+        # Auto-migrate old HuggingFace models to preinstalled BinShield-SecNet-v2
         # when running in standalone frozen .exe / MSI (where torch/transformers aren't bundled)
         if getattr(sys, "frozen", False):
             cur = str(self.data.get("llm_model") or "").strip()
@@ -142,14 +142,14 @@ class SettingsStore:
 # Main Application Window
 # ---------------------------------------------------------------------------
 
-class GhidraGuardApp(ctk.CTk):
+class BinShieldApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.title(f"GhidraGuard v{APP_VERSION} — Offline RE & Custom AI Binary Patcher")
+        self.title(f"BinShield v{APP_VERSION} — Offline RE & Custom AI Binary Patcher")
         self.geometry("1360x860")
         self.minsize(1120, 720)
         self.configure(fg_color=BG_ROOT)
@@ -160,7 +160,7 @@ class GhidraGuardApp(ctk.CTk):
         self.scanner = SystemScanner(log_callback=self.log)
         self.patcher = BinaryPatcher(log_callback=self.log)
 
-        # Auto-discover Ghidra (C:\ and %LOCALAPPDATA%\GhidraGuard\tools) on first launch
+        # Auto-discover Ghidra (C:\ and %LOCALAPPDATA%\BinShield\tools) on first launch
         if not self.settings.data.get("ghidra_headless_path"):
             discovered = discover_all_ghidra_paths()
             if discovered:
@@ -188,7 +188,7 @@ class GhidraGuardApp(ctk.CTk):
 
         self._build_layout()
         self._show_view("scanner")
-        self.log(f"[SYSTEM] GhidraGuard v{APP_VERSION} initialized (100% Local / Offline Mode).")
+        self.log(f"[SYSTEM] BinShield v{APP_VERSION} initialized (100% Local / Offline Mode).")
         if self.gpu_info.cuda_available:
             self.log(
                 f"[CUDA] Detected {self.gpu_info.gpu_name} ({self.gpu_info.vram_total_gb} GB VRAM, "
@@ -224,7 +224,7 @@ class GhidraGuardApp(ctk.CTk):
         brand = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         brand.pack(fill="x", padx=18, pady=(20, 14))
         ctk.CTkLabel(
-            brand, text="GHIDRAGUARD", font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            brand, text="BINSHIELD", font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
             text_color=BORDER_ACCENT,
         ).pack(anchor="w")
         ctk.CTkLabel(
@@ -846,7 +846,7 @@ class GhidraGuardApp(ctk.CTk):
             "1.0",
             "Select a suspicious .exe or .dll and click 'Start Iterative Disinfection'.\n\n"
             "Pipeline per pass (max 5 passes):\n"
-            "  1. Copy binary to isolated workspace & run Ghidra Headless (GhidraGuardExport.java)\n"
+            "  1. Copy binary to isolated workspace & run Ghidra Headless (BinShieldExport.java)\n"
             "  2. Audit decompiled pseudo-C, imports, strings & XREFs directly with local CUDA + Flash Attention AI\n"
             "  3. Parse strict JSON patch plan & apply surgical .text patches (RET / NOP / Jcc flip)\n"
             "  4. Strip invalidated Authenticode signature & recalculate PE CheckSum\n"
@@ -1287,7 +1287,7 @@ class GhidraGuardApp(ctk.CTk):
         if not is_admin():
             messagebox.showwarning(
                 "Administrator Required",
-                f"{label} requires Administrator privileges. Relaunch GhidraGuard as Administrator.",
+                f"{label} requires Administrator privileges. Relaunch BinShield as Administrator.",
             )
             return
 
@@ -1812,10 +1812,10 @@ class GhidraGuardApp(ctk.CTk):
                 return
 
             def _prompt() -> None:
-                self.log(f"[UPDATE] New GhidraGuard v{res.latest_version} available (current v{res.current_version}).")
+                self.log(f"[UPDATE] New BinShield v{res.latest_version} available (current v{res.current_version}).")
                 ans = messagebox.askyesno(
-                    "GhidraGuard Update Available",
-                    f"A new version of GhidraGuard (v{res.latest_version}) is available!\n"
+                    "BinShield Update Available",
+                    f"A new version of BinShield (v{res.latest_version}) is available!\n"
                     f"Current version: v{res.current_version}\n\n"
                     f"Download the update now from GitHub Releases?",
                 )
@@ -1831,7 +1831,7 @@ class GhidraGuardApp(ctk.CTk):
                                     0,
                                     lambda: messagebox.showinfo(
                                         "Update Downloaded",
-                                        f"GhidraGuard v{res.latest_version} ready:\n{msg}",
+                                        f"BinShield v{res.latest_version} ready:\n{msg}",
                                     ),
                                 )
                         except Exception as exc:
@@ -1851,7 +1851,7 @@ class GhidraGuardApp(ctk.CTk):
 
 
 def main() -> None:
-    app = GhidraGuardApp()
+    app = BinShieldApp()
     app.mainloop()
 
 

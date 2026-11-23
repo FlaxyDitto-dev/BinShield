@@ -1,5 +1,5 @@
 """
-GhidraGuard v2.0.0 CLI - Headless Scanner, Sanitizer, Disassembler, Sandbox, Folder Guard & Rollback
+BinShield v2.0.0 CLI - Headless Scanner, Sanitizer, Disassembler, Sandbox, Folder Guard & Rollback
 Supports Windows PE (.exe/.dll/.sys/.scr/.asi/.ocx), Android (.apk), Linux ELF (.so/.elf),
 and macOS Mach-O (.dylib) binaries.
 
@@ -231,12 +231,12 @@ def cmd_ai_scan(args: argparse.Namespace) -> int:
         print(f"Error: file not found: {target}", file=sys.stderr)
         return 2
 
-    from custom_model import GhidraGuardSecNetClient, format_scan_for_ai
+    from custom_model import BinShieldSecNetClient, format_scan_for_ai
 
     static_res = _scan_one(target)
     summary_text = format_scan_for_ai(static_res, filename=target.name)
 
-    client = GhidraGuardSecNetClient(device=args.device, log_callback=(None if args.json else print))
+    client = BinShieldSecNetClient(device=args.device, log_callback=(None if args.json else print))
     ai_pred = client.predict(summary_text)
     payload = {"file": str(target), "static_score": static_res.get("risk_score", 0), "ai": ai_pred}
     if args.json:
@@ -325,7 +325,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         print(json.dumps(out, indent=2) if args.json else f"[UPDATE] Check failed: {res.error}", file=sys.stderr if not args.json else sys.stdout)
         return 1
     if not res.update_available:
-        print(json.dumps(out, indent=2) if args.json else f"[UPDATE] GhidraGuard CLI v{res.current_version} is already up to date.")
+        print(json.dumps(out, indent=2) if args.json else f"[UPDATE] BinShield CLI v{res.current_version} is already up to date.")
         return 0
     if args.check:
         print(json.dumps(out, indent=2) if args.json else f"[UPDATE] New version available: v{res.latest_version} (current v{res.current_version})")
@@ -341,10 +341,10 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="ghidraguard",
-        description=f"GhidraGuard v{APP_VERSION} Headless Security CLI (PE / APK / ELF / Mach-O)",
+        prog="binshield",
+        description=f"BinShield v{APP_VERSION} Headless Security CLI (PE / APK / ELF / Mach-O)",
     )
-    parser.add_argument("--version", action="version", version=f"GhidraGuard {APP_VERSION}")
+    parser.add_argument("--version", action="version", version=f"BinShield {APP_VERSION}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_scan = sub.add_parser("scan", help="Scan a PE/APK/ELF/Mach-O file or folder (+ YARA)")
@@ -365,7 +365,7 @@ def main() -> int:
     p_ver.add_argument("--json", action="store_true")
     p_ver.set_defaults(func=cmd_verify)
 
-    p_ai = sub.add_parser("ai-scan", help="Classify a binary using custom trained GhidraGuard-SecNet-v2 AI")
+    p_ai = sub.add_parser("ai-scan", help="Classify a binary using custom trained BinShield-SecNet-v2 AI")
     p_ai.add_argument("target")
     p_ai.add_argument("--device", default="auto", choices=["auto", "gpu", "npu", "cpu", "onnx", "torch"])
     p_ai.add_argument("--json", action="store_true")
@@ -402,7 +402,7 @@ def main() -> int:
     p_rb.add_argument("--snapshot", default=None)
     p_rb.set_defaults(func=cmd_rollback)
 
-    p_upd = sub.add_parser("update", help="Explicitly check for and apply the latest GhidraGuard CLI release")
+    p_upd = sub.add_parser("update", help="Explicitly check for and apply the latest BinShield CLI release")
     p_upd.add_argument("--check", action="store_true")
     p_upd.add_argument("--json", action="store_true")
     p_upd.set_defaults(func=cmd_update)

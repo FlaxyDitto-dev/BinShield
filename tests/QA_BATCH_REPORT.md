@@ -1,7 +1,7 @@
-# GhidraGuard Automated Batch QA Validation Report (210 Real Binaries)
+# BinShield Automated Batch QA Validation Report (210 Real Binaries)
 
 - **Total Samples Tested:** 210 (`75 .exe`, `65 .dll`, `70 .apk`)
-- **Total Execution Time:** 26.01s
+- **Total Execution Time:** 27.9s
 - **Detection Accuracy:** **100.0%** (TP=120, TN=90, FP=0, FN=0)
 - **Precision / Recall / F1:** 100.0% / 100.0% / 100.0%
 - **Sanitization Clearance Rate:** **100.0%** (120/120 sanitized binaries verified clean)
