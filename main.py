@@ -49,7 +49,7 @@ from scanner import (
     analyze_pe_file,
     get_active_connections,
 )
-from updater import APP_VERSION, check_for_updates, download_update
+from updater import APP_VERSION, apply_self_update, check_for_updates, download_update
 
 
 # ---------------------------------------------------------------------------
@@ -1815,13 +1815,17 @@ class GhidraGuardApp(ctk.CTk):
                     def _dl() -> None:
                         try:
                             path = download_update(res, log_callback=self.log)
-                            self.after(
-                                0,
-                                lambda: messagebox.showinfo(
-                                    "Update Downloaded",
-                                    f"GhidraGuard v{res.latest_version} downloaded to:\n{path}",
-                                ),
-                            )
+                            ok, msg = apply_self_update(path, relaunch=True, log_callback=self.log)
+                            if ok:
+                                self.after(0, self.destroy)
+                            else:
+                                self.after(
+                                    0,
+                                    lambda: messagebox.showinfo(
+                                        "Update Downloaded",
+                                        f"GhidraGuard v{res.latest_version} ready:\n{msg}",
+                                    ),
+                                )
                         except Exception as exc:
                             self.log(f"[UPDATE] Download error: {exc}")
                     threading.Thread(target=_dl, daemon=True).start()

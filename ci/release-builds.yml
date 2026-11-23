@@ -1,4 +1,4 @@
-name: Build Cross-Platform Release Binaries
+name: Unified Cross-Platform Release Builds (Windows, Linux, macOS, Android)
 
 on:
   push:
@@ -10,6 +10,20 @@ permissions:
   contents: write
 
 jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: .\build.bat
+      - run: .\dist\GhidraGuard-CLI.exe --version
+      - if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist/GhidraGuard-GUI.exe dist/GhidraGuard-CLI.exe --clobber
+
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -17,19 +31,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Tk & build Linux GUI + CLI binaries
-        run: |
+      - run: |
           sudo apt-get update && sudo apt-get install -y python3-tk
           chmod +x build_linux.sh
           ./build_linux.sh
-      - name: Smoke test Linux CLI
-        run: ./dist/GhidraGuard-CLI-Linux --version
-      - name: Upload Linux release assets
-        if: startsWith(github.ref, 'refs/tags/v')
+          ./dist/GhidraGuard-CLI-Linux --version
+      - if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${GITHUB_REF_NAME}" dist/GhidraGuard-GUI-Linux dist/GhidraGuard-CLI-Linux --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/GhidraGuard-GUI-Linux dist/GhidraGuard-CLI-Linux --clobber
 
   build-macos:
     runs-on: macos-latest
@@ -38,16 +48,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build macOS GUI + CLI binaries
-        run: |
+      - run: |
           chmod +x build_macos.sh
           ./build_macos.sh
           cd dist && zip -r GhidraGuard-GUI-macOS.zip GhidraGuard-GUI-macOS.app || true
-      - name: Smoke test macOS CLI
-        run: ./dist/GhidraGuard-CLI-macOS --version
-      - name: Upload macOS release assets
-        if: startsWith(github.ref, 'refs/tags/v')
+          ./GhidraGuard-CLI-macOS --version
+      - if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist/GhidraGuard-CLI-macOS dist/GhidraGuard-GUI-macOS.zip --clobber
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug testDebugUnitTest --no-daemon
+      - if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" dist/GhidraGuard-CLI-macOS dist/GhidraGuard-GUI-macOS.zip --clobber
+          cp android/app/build/outputs/apk/debug/app-debug.apk "GhidraGuard-Android-${{ github.ref_name }}.apk"
+          gh release upload "${{ github.ref_name }}" "GhidraGuard-Android-${{ github.ref_name }}.apk" --clobber

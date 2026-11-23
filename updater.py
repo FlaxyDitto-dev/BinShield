@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-APP_VERSION = "1.1.3"
+APP_VERSION = "2.0.0"
 GITHUB_REPO = "FlaxyDitto-dev/GhidraGuard"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -166,3 +166,49 @@ def download_update(
     # If running as a frozen PyInstaller executable on Unix, offer atomic swap path
     log(f"[UPDATE] Downloaded v{result.latest_version} to: {dest}")
     return dest
+
+
+def apply_self_update(
+    downloaded_binary: Path,
+    relaunch: bool = True,
+    log_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[bool, str]:
+    """
+    One-click self-replace updater for frozen executables (Windows .exe / Linux / macOS).
+    - On Windows: writes a tiny self-deleting .bat helper that waits for the current PID to exit,
+      atomically moves the new .exe into place, and optionally relaunches it.
+    - On Linux/macOS: atomically replaces the running executable via os.replace().
+    """
+    import subprocess
+    log = log_callback or (lambda msg: None)
+    if not getattr(sys, "frozen", False):
+        return False, f"Running from source; downloaded binary is ready at: {downloaded_binary}"
+
+    current_exe = Path(sys.executable).resolve()
+    if not downloaded_binary.is_file():
+        return False, f"Downloaded update not found: {downloaded_binary}"
+
+    if os.name == "nt":
+        pid = os.getpid()
+        bat = Path(tempfile.gettempdir()) / f"gg_self_update_{pid}.bat"
+        relaunch_cmd = f'start "" "{current_exe}"' if relaunch else ""
+        script = (
+            "@echo off\r\n"
+            f":wait\r\n"
+            f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul\r\n'
+            "if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\r\n"
+            f'move /Y "{downloaded_binary}" "{current_exe}" >nul\r\n'
+            f"{relaunch_cmd}\r\n"
+            'del "%~f0"\r\n'
+        )
+        bat.write_text(script, encoding="utf-8")
+        subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        log(f"[UPDATE] Scheduled Windows self-replace swap for {current_exe.name}.")
+        return True, f"Self-update scheduled; replacing {current_exe.name} on exit."
+
+    os.replace(downloaded_binary, current_exe)
+    current_exe.chmod(current_exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    log(f"[UPDATE] Replaced {current_exe} in-place.")
+    if relaunch:
+        os.execv(str(current_exe), [str(current_exe)])
+    return True, f"Updated {current_exe} in-place."

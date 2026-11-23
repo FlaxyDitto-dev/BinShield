@@ -1,10 +1,18 @@
-# GhidraGuard (`v1.1.0`)
+# GhidraGuard (`v2.0.0`)
 
-**GhidraGuard** is a **100% free, local, offline** security scanner, reverse-engineering assistant, and surgical binary sanitizer for **Windows, Linux, macOS, Google Colab, and Android** (`.exe`, `.dll`, `.apk`, `.so`).
+**GhidraGuard** is a **100% free, local, offline** security scanner, disassembler, sandbox, and surgical binary sanitizer for **Windows, Linux, macOS, Google Colab, and Android** (`.exe`, `.dll`, `.apk`, `.so`, `.elf`, `.dylib`).
 
-- **Custom Trained AI Model (`GhidraGuard-SecNet-v1`):** Custom 13.9M-parameter 6-layer Transformer trained specifically for GhidraGuard on NVIDIA RTX 5060 Ti (`100%` validation accuracy across 12 threat categories & 8 surgical patch strategies). Only **26.5 MB** FP16 safetensors — **auto-downloads on first use** from GitHub Releases' Fastly Global CDN and runs on CUDA, Apple MPS, Google Colab GPUs, or CPU.
-- **Built-In Auto-Updater:** Automatically checks for updates on Windows/Linux/macOS GUI, Android, and Google Colab. The CLI never auto-updates silently and uses an explicit `update` command instead.
-- **Prebuilt Releases:** Download `GhidraGuard-GUI.exe`, `GhidraGuard-CLI.exe`, Linux/macOS binaries, custom AI model weights, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/GhidraGuard/releases/latest).
+- **Custom Trained Multimodal AI (`GhidraGuard-SecNet-v2`):** 13.9M-parameter Transformer trained on NVIDIA RTX 5060 Ti across Ghidra pseudo-C, raw x86/x64/ARM64 opcodes, PE/APK/ELF/Mach-O structure, and YARA hits — exported as **INT8 Quantized ONNX (~14 MB, 2–3× faster on CPU/NPU)** + **FP16 Safetensors (~26.5 MB for CUDA/MPS/XPU)** with fast auto-download from GitHub Releases CDN.
+- **Full-Stack Security Suite (`v2.0.0`):**
+  - **Windows PE + Android APK + Linux ELF + macOS Mach-O** deep detection & integrity-preserving sanitization
+  - **Offline YARA Rule Engine** (`rules/default_rules.yar`, drop custom `.yar` files anytime)
+  - **In-App APK Re-Signer** (`apksigner` v1/v2/v3 + built-in SHA-256 v1 fallback)
+  - **Real-Time Folder & Download Guard** (`watch` background scanner with optional auto-quarantine)
+  - **SHA-256 Rollback Manager & Patch Diff Viewer** (`rollback`, `diff`)
+  - **Direct Ghidra-Free Capstone Disassembler & UPX Auto-Unpacker** (`disasm`)
+  - **Automated Dynamic Sandbox Runner** (`sandbox` with Windows Job Object isolation)
+  - **One-Click Self-Replace Auto-Updater** (automatic on GUI/Android/Colab; explicit `update` command on CLI)
+- **Prebuilt Releases:** Download standalone executables (`GhidraGuard-GUI.exe`, `GhidraGuard-CLI.exe`, `GhidraGuard-GUI-Linux`, `GhidraGuard-CLI-Linux`, `GhidraGuard-Android-v2.0.0.apk`), INT8 AI weights, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/GhidraGuard/releases/latest).
 - **Google Colab:** Open [`GhidraGuard_Colab.ipynb`](https://colab.research.google.com/github/FlaxyDitto-dev/GhidraGuard/blob/main/GhidraGuard_Colab.ipynb) directly in Colab with free GPU acceleration.
 
 ---

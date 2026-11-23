@@ -256,19 +256,24 @@ def _generate_training_dataset(seed: int = 1337) -> Tuple[List[Tuple[str, int, i
         }
         all_samples.append((format_scan_for_ai(static_res), 1, 10, 1))
 
-    # --- 12. APK / DEX / ELF Injection (cat=11, strat=7 SANITIZE_APK) ---
+    # --- 12. APK / DEX / ELF / Mach-O Injection (cat=11, strat=7 SANITIZE_APK) ---
     apk_anom_types = [
-        ("INJECTED_SECONDARY_DEX", "Malicious indicators in classes2.dex: In-memory DEX dynamic payload loader"),
-        ("INJECTED_NATIVE_SO", "Malicious native library 'lib/arm64-v8a/libfrida-gadget.so'"),
-        ("ELF_INJECTED_STUB", "Injected executable stub in 'lib/arm64-v8a/libgame.so'"),
-        ("MANIFEST_DEBUGGABLE", "Manifest tampered: android:debuggable=true enabled"),
-        ("MALICIOUS_ASSET_PAYLOAD", "Malicious payload in 'assets/dropper.bin': hidden ELF binary in assets"),
+        ("apk", "INJECTED_SECONDARY_DEX", "Malicious indicators in classes2.dex: In-memory DEX dynamic payload loader"),
+        ("apk", "INJECTED_NATIVE_SO", "Malicious native library 'lib/arm64-v8a/libfrida-gadget.so'"),
+        ("apk", "ELF_INJECTED_STUB", "Injected executable stub in 'lib/arm64-v8a/libgame.so'"),
+        ("apk", "MANIFEST_DEBUGGABLE", "Manifest tampered: android:debuggable=true enabled"),
+        ("apk", "MALICIOUS_ASSET_PAYLOAD", "Malicious payload in 'assets/dropper.bin': hidden ELF binary in assets"),
+        ("elf", "ELF_RWX_SEGMENT", "RWX PT_LOAD segment #0 (PF_W|PF_X)"),
+        ("elf", "ELF_INJECTED_STUB", "Injected executable stub in ELF section #1"),
+        ("mach-o", "MACHO_INJECTED_DYLIB", "Unauthorized injected dylib load command: /tmp/libfrida.dylib"),
+        ("mach-o", "MACHO_RWX_SEGMENT", "RWX Mach-O segment '__TEXT'"),
     ]
-    for i in range(1800):
-        at, ind = rng.choice(apk_anom_types)
+    for i in range(2400):
+        bt, at, ind = rng.choice(apk_anom_types)
+        ext = {"apk": "apk", "elf": "elf", "mach-o": "dylib"}[bt]
         static_res = {
-            "type": "apk",
-            "name": f"inf_app_{i}.apk",
+            "type": bt,
+            "name": f"inf_bin_{i}.{ext}",
             "risk_score": rng.choice([35, 55, 75, 100]),
             "severity": rng.choice(["MEDIUM", "HIGH", "CRITICAL"]),
             "signed": False,
@@ -278,6 +283,36 @@ def _generate_training_dataset(seed: int = 1337) -> Tuple[List[Tuple[str, int, i
             "indicators": [ind],
         }
         all_samples.append((format_scan_for_ai(static_res), 1, 11, 7))
+
+    # --- 13. Clean ELF / Mach-O & Disassembly Opcode Samples (cat=0, strat=0) ---
+    for i in range(1500):
+        bt = "elf" if i % 2 == 0 else "mach-o"
+        static_res = {
+            "type": bt,
+            "name": f"clean_unix_{i}.{'so' if bt == 'elf' else 'dylib'}",
+            "risk_score": 0,
+            "severity": "LOW",
+            "signed": True,
+            "is_packed": False,
+            "anomalies": [],
+            "suspicious_imports": [],
+            "indicators": [],
+        }
+        all_samples.append((format_scan_for_ai(static_res), 0, 0, 0))
+
+    # Raw disassembly opcode pairs (clean vs shellcode)
+    clean_asm = [
+        "DISASM x86_64\npush rbp; mov rbp, rsp; add edi, esi; mov eax, edi; pop rbp; ret",
+        "DISASM x86_64\nxor eax, eax; ret",
+        "DISASM arm64\nmov x0, #0; ret",
+    ]
+    mal_asm = [
+        "DISASM x86_64\nmov rax, qword ptr gs:[0x60]; mov rax, [rax+0x18]; call rbx",
+        "DISASM x86_64\ncld; and rsp, -0x10; call 0x1005; pop rax; jmp rcx",
+    ]
+    for i in range(600):
+        all_samples.append((rng.choice(clean_asm), 0, 0, 0))
+        all_samples.append((rng.choice(mal_asm), 1, 8, 6))
 
     rng.shuffle(all_samples)
     val_size = 3500
@@ -372,19 +407,28 @@ def train() -> None:
     save_file(fp16_state, str(weights_path))
     tokenizer.save(vocab_path)
 
-    # Export universal ONNX (GPU / CPU / NPU)
+    # Export universal ONNX FP32 -> INT8 dynamically quantized (~14 MB, 2-3x faster on CPU/NPU!)
+    from onnxruntime.quantization import QuantType, quantize_dynamic
+
     model_cpu = model.cpu().float().eval()
     dummy = torch.zeros((1, 256), dtype=torch.long)
+    fp32_onnx = OUT_DIR / f"{MODEL_NAME}-fp32.onnx"
     torch.onnx.export(
         model_cpu,
         (dummy,),
-        str(onnx_path),
+        str(fp32_onnx),
         input_names=["input_ids"],
         output_names=["mal_logit", "cat_logits", "strat_logits"],
         dynamic_axes={"input_ids": {0: "batch"}, "mal_logit": {0: "batch"}, "cat_logits": {0: "batch"}, "strat_logits": {0: "batch"}},
         opset_version=17,
         dynamo=False,
     )
+    quantize_dynamic(
+        model_input=str(fp32_onnx),
+        model_output=str(onnx_path),
+        weight_type=QuantType.QUInt8,
+    )
+    fp32_onnx.unlink(missing_ok=True)
 
     w_mb = weights_path.stat().st_size / (1024 * 1024)
     o_mb = onnx_path.stat().st_size / (1024 * 1024)
