@@ -20,6 +20,13 @@ object PeAnalyzerPatcher {
     private const val IMAGE_SCN_MEM_WRITE = 0x80000000.toInt()
     private const val STREAM_CHUNK = 1024 * 1024
 
+    private val PROXY_SIDELOAD_DLL_NAMES = setOf(
+        "version.dll", "dinput8.dll", "dxgi.dll", "d3d11.dll", "d3d12.dll",
+        "winmm.dll", "dbghelp.dll", "xinput1_3.dll", "xinput1_4.dll",
+        "wsock32.dll", "winhttp.dll", "cryptbase.dll", "msimg32.dll",
+        "uxtheme.dll", "bink2w64.dll",
+    )
+
     private val SUSPICIOUS_WIN32_APIS = listOf(
         "VirtualAllocEx",
         "WriteProcessMemory",
@@ -234,6 +241,14 @@ object PeAnalyzerPatcher {
         if (matchedApis.isNotEmpty()) {
             score += minOf(45, matchedApis.size * 8)
             indicators.add("Suspicious Win32 APIs/strings (${matchedApis.size}): ${matchedApis.take(5).joinToString(", ")}")
+        }
+        if (displayName.lowercase() in PROXY_SIDELOAD_DLL_NAMES && !hasAuthenticode) {
+            if (matchedApis.isNotEmpty()) {
+                score += 25
+                indicators.add("Unsigned proxy/sideloaded DLL '$displayName' with high-risk Win32 APIs")
+            } else {
+                indicators.add("Unsigned proxy DLL '$displayName' (verify if legitimate game/mod loader)")
+            }
         }
 
         val clamped = score.coerceIn(0, 100)

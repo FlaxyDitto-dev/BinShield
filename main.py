@@ -400,6 +400,15 @@ class GhidraGuardApp(ctk.CTk):
 
         ctk.CTkButton(
             top_row,
+            text="Scan Game / App Folder (.exe + .dll)",
+            fg_color=ACCENT_PURPLE,
+            hover_color="#7C3AED",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._scan_game_folder,
+        ).pack(side="right", padx=6)
+
+        ctk.CTkButton(
+            top_row,
             text="Inspect Manual PE (.exe/.dll)",
             fg_color=BG_CARD_ALT,
             hover_color=BORDER_GLASS,
@@ -504,6 +513,48 @@ class GhidraGuardApp(ctk.CTk):
         self._scanning = False
         self.btn_scan.configure(state="normal")
         self.btn_cancel_scan.configure(state="disabled")
+
+    def _scan_game_folder(self) -> None:
+        if self._scanning:
+            return
+        folder = filedialog.askdirectory(
+            title="Select Game / Application Folder to Audit All .exe & .dll Files"
+        )
+        if not folder:
+            return
+        self._scanning = True
+        self.btn_scan.configure(state="disabled")
+        self.btn_cancel_scan.configure(state="normal")
+        self.scan_progress.set(0.05)
+        self.lbl_scan_status.configure(text=f"Scanning all .exe & .dll files in {os.path.basename(folder)}...")
+
+        def _worker() -> None:
+            def _prog(val: float, text: str) -> None:
+                self.after(0, lambda v=val, t=text: (self.scan_progress.set(v), self.lbl_scan_status.configure(text=t)))
+
+            try:
+                results, stats = self.scanner.scan_directory(
+                    folder_path=folder,
+                    min_score=0,
+                    progress_callback=_prog,
+                )
+                self.findings = results
+                self.after(0, self._render_findings)
+                if stats["flagged_count"] == 0 and stats["total_pe"] > 0:
+                    self.after(
+                        0,
+                        lambda s=stats: messagebox.showinfo(
+                            "Folder Audit Clean",
+                            f"Scanned {s['total_pe']} PE binary(ies) ({s['exe_count']} .exe, {s['dll_count']} .dll).\n"
+                            f"0 high-risk threats detected! Normal same-folder file access is allowed.",
+                        ),
+                    )
+            except Exception as exc:
+                self.log(f"[SCAN] Folder scan error: {exc}")
+            finally:
+                self.after(0, self._finish_scan_ui)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _inspect_manual_file(self) -> None:
         path = filedialog.askopenfilename(

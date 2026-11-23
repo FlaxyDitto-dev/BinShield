@@ -59,8 +59,7 @@ SUSPICIOUS_API_CATEGORIES: Dict[str, Set[str]] = {
     },
     "Anti-Debug / Anti-VM": {
         "IsDebuggerPresent", "CheckRemoteDebuggerPresent",
-        "NtQueryInformationProcess", "OutputDebugStringA", "OutputDebugStringW",
-        "GetTickCount64", "QueryPerformanceCounter",
+        "NtQueryInformationProcess",
     },
     "Crypto / Obfuscation": {
         "CryptEncrypt", "CryptDecrypt", "CryptAcquireContextA",
@@ -80,6 +79,16 @@ SYSTEM_BINARY_NAMES: Set[str] = {
     "taskhostw.exe", "dllhost.exe", "rundll32.exe", "spoolsv.exe",
     "dwm.exe", "sihost.exe", "ctfmon.exe", "SearchIndexer.exe".lower(),
 }
+
+# Common Windows / game proxy DLL names frequently abused for DLL sideloading / hijacking
+PROXY_SIDELOAD_DLL_NAMES: Set[str] = {
+    "version.dll", "dinput8.dll", "dxgi.dll", "d3d11.dll", "d3d12.dll",
+    "winmm.dll", "dbghelp.dll", "xinput1_3.dll", "xinput1_4.dll",
+    "wsock32.dll", "winhttp.dll", "cryptbase.dll", "msimg32.dll",
+    "uxtheme.dll", "wtsapi32.dll", "dwmapi.dll", "bink2w64.dll",
+}
+
+PE_SCAN_EXTENSIONS: Tuple[str, ...] = (".exe", ".dll", ".asi", ".flt", ".ocx", ".scr", ".sys")
 
 SUSPICIOUS_PATH_FRAGMENTS: Tuple[str, ...] = (
     "\\appdata\\local\\temp\\",
@@ -407,10 +416,11 @@ def analyze_pe_file(
                 suffix = f" (+{len(suspicious_imports) - 6} more)" if len(suspicious_imports) > 6 else ""
                 indicators.append(f"Suspicious APIs: {preview}{suffix}")
 
-        # Section entropy (packer / obfuscation indicator)
+        # Section entropy (bounded 256 KB sample per section for O(1) RAM on multi-GB game EXEs)
         for sec in pe.sections:
             sec_name = sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
-            data = sec.get_data()
+            sample_len = min(int(sec.SizeOfRawData or 0), 256 * 1024)
+            data = sec.get_data(length=sample_len) if sample_len > 0 else b""
             ent = _shannon_entropy(data)
             if ent > max_entropy:
                 max_entropy = ent
@@ -423,6 +433,15 @@ def analyze_pe_file(
             is_packed = True
             score += 15
             indicators.append(f"High section entropy ({max_entropy:.2f}) — possibly packed/encrypted")
+
+        # DLL Sideloading / Proxy DLL check (common attack vector in leaked game folders)
+        if name.lower() in PROXY_SIDELOAD_DLL_NAMES and not _is_in_legit_windows_dir(file_path):
+            if not signed and (categories & {"Keylogger / Spyware", "Process Injection / RAT", "C2 / Network Dropper", "Persistence / Privilege", "Execution / Shell"}):
+                score += 25
+                categories.add("DLL Sideloading / Proxy")
+                indicators.append(f"Unsigned proxy/sideloaded DLL '{name}' with high-risk imports")
+            elif not signed:
+                indicators.append(f"Unsigned proxy DLL '{name}' (verify if legitimate mod/loader)")
 
         pe.close()
     except pefile.PEFormatError:
@@ -614,6 +633,80 @@ class SystemScanner:
             progress_callback(1.0, f"Scan complete: {len(findings)} suspicious item(s) found.")
         self._log(f"[SCAN] Complete. Identified {len(findings)} suspicious artifact(s) (threshold >= {min_score}).")
         return findings
+
+    def scan_directory(
+        self,
+        folder_path: str,
+        min_score: int = 0,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+    ) -> Tuple[List[ThreatFinding], Dict[str, int]]:
+        """
+        Recursively scan a game or application folder for ALL Windows PE binaries
+        (.exe, .dll, .asi, .flt, .ocx, .scr, .sys), including unsigned proxy/sideloaded DLLs.
+        Allows normal same-folder file access while flagging credential theft, C2,
+        persistence, injection, keyloggers, and malicious proxy DLLs.
+        """
+        self._cancel = False
+        root = Path(folder_path)
+        if not root.is_dir():
+            raise NotADirectoryError(f"Folder not found: {folder_path}")
+
+        self._log(f"[SCAN] Scanning game/app folder recursively for .exe / .dll binaries: {folder_path}")
+        if progress_callback:
+            progress_callback(0.05, f"Discovering .exe / .dll files in {root.name}...")
+
+        candidates: List[str] = []
+        for dirpath, _dirnames, filenames in os.walk(folder_path):
+            if self._cancel:
+                break
+            for fn in filenames:
+                if fn.lower().endswith(PE_SCAN_EXTENSIONS):
+                    candidates.append(os.path.join(dirpath, fn))
+
+        total = max(1, len(candidates))
+        exe_count = sum(1 for c in candidates if c.lower().endswith(".exe"))
+        dll_count = sum(1 for c in candidates if c.lower().endswith((".dll", ".asi", ".flt", ".ocx")))
+        findings: List[ThreatFinding] = []
+        flagged_count = 0
+
+        for idx, fpath in enumerate(candidates):
+            if self._cancel:
+                break
+            if progress_callback:
+                progress_callback(
+                    0.08 + 0.90 * ((idx + 1) / total),
+                    f"Auditing {os.path.basename(fpath)} ({idx + 1}/{len(candidates)})...",
+                )
+            rel_parent = os.path.relpath(os.path.dirname(fpath), folder_path)
+            src_label = "Game Folder (.exe)" if fpath.lower().endswith(".exe") else "Game Folder (.dll)"
+            res = analyze_pe_file(
+                fpath,
+                source=src_label,
+                persistence_ref=f".\\{rel_parent}" if rel_parent != "." else "Root Folder",
+            )
+            if res is None:
+                continue
+            if res.risk_score >= 25:
+                flagged_count += 1
+            if res.risk_score >= min_score:
+                findings.append(res)
+
+        findings.sort(key=lambda x: x.risk_score, reverse=True)
+        stats = {
+            "total_pe": len(candidates),
+            "exe_count": exe_count,
+            "dll_count": dll_count,
+            "flagged_count": flagged_count,
+            "clean_count": max(0, len(candidates) - flagged_count),
+        }
+        msg = (
+            f"Folder scan complete: {len(candidates)} PE file(s) "
+            f"({exe_count} .exe, {dll_count} .dll) — {stats['clean_count']} clean, {flagged_count} flagged."
+        )
+        if progress_callback:
+            progress_callback(1.0, msg)
+        self._log(f"[SCAN] {msg}")
+        return findings, stats
 
     def _enumerate_scheduled_tasks(self) -> List[Tuple[str, str]]:
         """Query Windows Scheduled Tasks via schtasks CSV output."""

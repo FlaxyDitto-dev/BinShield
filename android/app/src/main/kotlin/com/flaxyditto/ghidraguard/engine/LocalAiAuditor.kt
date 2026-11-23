@@ -42,6 +42,7 @@ object LocalAiAuditor {
     private var cachedKey: String = ""
 
     private const val ANDROID_SYSTEM_PROMPT = """You are an expert Reverse Engineer and Malware Analyst auditing either an Android APK (permissions, DEX strings, native ELF .so sections) OR a Windows PE binary (.exe/.dll sections, Win32 APIs, entropy, strings).
+GAME-SAFE & SAME-FOLDER RULE: Always allow legitimate game/app file access within its own folder (assets, configs, saves, sibling DLLs), DirectX/Vulkan/audio/input APIs. Only flag real malware (credential/Discord/wallet theft, external C2/webhooks, persistence, foreign-process injection, keyloggers, ransomware, hidden shell droppers).
 Respond ONLY with valid JSON matching this exact schema (no markdown fences, no extra prose):
 {
   "is_clean": false,

@@ -81,7 +81,8 @@ public class GhidraGuardExport extends GhidraScript {
     private static final Pattern INTERESTING_STRING_RE = Pattern.compile(
         "(?i)(https?://|ftp://|\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b|" +
         "CurrentVersion\\\\Run|Software\\\\Microsoft\\\\Windows|" +
-        "cmd\\.exe|powershell|schtasks|vssadmin|bcdedit|" +
+        "cmd\\.exe|powershell|schtasks|vssadmin|bcdedit|Add-MpPreference|" +
+        "discord\\.com/api/webhooks|api\\.telegram\\.org|Login Data|Local State|wallet\\.dat|" +
         "vmware|vbox|virtualbox|sandboxie|wireshark|x64dbg|ollydbg|" +
         "keylog|beacon|payload|inject|password|wallet|cookie|discord|telegram)"
     );

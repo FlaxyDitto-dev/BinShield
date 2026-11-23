@@ -54,13 +54,29 @@ PROTECTED_NAME_PREFIXES = (
     "imgui", "sdl_", "glfw", "createwindow", "showwindow", "updatewindow",
     "dispatchmessage", "translatemessage", "getmessage", "peekmessage",
     "messagebox", "drawtext", "paint", "render", "log_", "print_", "debug_print",
+    # Game engine / graphics / audio / input / same-folder asset & save loaders
+    "d3d11", "d3d12", "dxgi", "vulkan", "vk_", "opengl", "gl_", "xinput", "dinput",
+    "xaudio", "fmod", "wwise", "physx", "havok", "bink", "rage_", "fidevice",
+    "grc_", "aud_", "shader_", "texture_", "asset_", "load_asset", "read_config",
+    "save_game", "load_game", "init_engine",
+)
+
+# Hard malware indicators that override benign file-I/O / game-engine heuristics
+HARD_MALWARE_MARKERS = (
+    "virtualallocex", "writeprocessmemory", "createremotethread", "ntunmapviewofsection",
+    "setwindowshookex", "getasynckeystate", "getclipboarddata", "urldownloadtofile",
+    "regsetvalueex", "createservice", "discord.com/api/webhooks", "api.telegram.org",
+    "login data", "local state", "wallet.dat", "vssadmin", "add-mppreference",
+    "powershell", "cmd.exe", "internetopen", "httpsendrequest", "winhttpopen",
+    "cryptencrypt", "bcryptencrypt",
 )
 
 
 def is_protected_function(func_name: str, pseudo_c: str = "") -> Optional[str]:
     """
     Guardrail preventing surgical patches from ever hitting entry points,
-    CRT/standard libraries, print/logging helpers, or GUI/window callbacks.
+    CRT/standard libraries, print/logging helpers, GUI/window callbacks,
+    or benign same-folder game asset / config / DLL loaders.
     Returns a human-readable reason if protected, else None.
     """
     low = (func_name or "").strip().lower()
@@ -68,14 +84,26 @@ def is_protected_function(func_name: str, pseudo_c: str = "") -> Optional[str]:
         return "empty function name"
     if low in PROTECTED_EXACT_NAMES:
         return f"protected symbol '{func_name}' (entrypoint/stdio/CRT/GUI)"
-    if any(low.startswith(pref) for pref in PROTECTED_NAME_PREFIXES):
-        return f"protected library/GUI/print prefix '{func_name}'"
-    # Protect pure GUI window message loops (DefWindowProc + TranslateMessage/DispatchMessage without malware APIs)
-    if pseudo_c:
-        pc_low = pseudo_c.lower()
+
+    pc_low = (pseudo_c or "").lower()
+    has_hard_malware = any(m in pc_low for m in HARD_MALWARE_MARKERS)
+
+    if any(low.startswith(pref) for pref in PROTECTED_NAME_PREFIXES) and not has_hard_malware:
+        return f"protected library/GUI/game-engine prefix '{func_name}'"
+
+    if pc_low and not has_hard_malware:
+        # Protect pure GUI window message loops
         gui_markers = ("defwindowproc", "beginpaint", "endpaint", "translatemessage", "dispatchmessage")
         if sum(1 for m in gui_markers if m in pc_low) >= 2:
             return f"GUI message/paint loop detected in '{func_name}'"
+
+        # Protect pure same-folder file/DLL access (CreateFile/ReadFile/WriteFile/LoadLibrary
+        # without any C2, injection, persistence, keylogger, or credential-theft indicators)
+        same_folder_io = ("createfile", "readfile", "writefile", "findfirstfile", "loadlibrary", "getmodulefilename")
+        outside_targets = ("appdata", "localappdata", "userprofile", "system32", "windows\\", "chrome", "discord", "telegram", "wallet", ".ssh")
+        if any(io in pc_low for io in same_folder_io) and not any(o in pc_low for o in outside_targets):
+            return f"benign same-folder file/DLL access detected in '{func_name}' (no malware markers)"
+
     return None
 
 
@@ -88,12 +116,13 @@ Your job is to identify malicious (or simulated-malicious) functions such as RAT
 
 CRITICAL RULES:
 1. Respond ONLY with valid JSON matching the exact schema below. Do NOT wrap in markdown or add extra commentary.
-2. NEVER flag `main`, `entry`, `WinMain`, `DllMain`, or harmless helper/math/calculator functions. Only flag individual malicious helper functions.
-3. Look closely at each function's pseudo-C body: if a function has ALREADY been patched (e.g., its entire body is just `return 0;` or `return;` or starts with `31c0c3` / `c3` with no active malicious code left), it is ALREADY NEUTRALIZED — do NOT flag it!
-4. If NO active malicious helper functions remain in the pseudo-C, set "is_clean": true and "malicious_functions": [].
-5. If the binary appears heavily packed/encrypted with no readable code, set "unpatchable_or_packed": true.
-6. For each malicious function, copy its EXACT "function_name", "va", and "file_offset" from the input metadata.
-7. Choose the safest surgical "patch_strategy":
+2. NEVER flag `main`, `entry`, `WinMain`, `DllMain`, or harmless helper/math/calculator/game-engine functions. Only flag individual malicious helper functions.
+3. GAME-SAFE & SAME-FOLDER ACCESS RULE: Programs and games legitimately read/write assets, configs, shaders, saves, logs, and load sibling `.dll`s inside their OWN folder or relative subdirectories (`./`, `data/`, `x64/`, `*.rpf`, `*.pak`, `*.ini`, `*.cfg`, `*.sav`, `*.dll`). ALWAYS ALLOW normal same-folder file access (`CreateFile`, `ReadFile`, `WriteFile`, `fopen`, `LoadLibrary` on local folder paths), DirectX/Vulkan/OpenGL rendering, audio, and input APIs. ONLY flag functions that perform real malicious actions (stealing credentials/cookies/Discord/Telegram/crypto wallets outside the game folder, external C2/webhook exfiltration, registry `Run`/service persistence, process injection into other processes, keyloggers, ransomware encrypting user documents, or hidden PowerShell/cmd droppers).
+4. Look closely at each function's pseudo-C body: if a function has ALREADY been patched (e.g., its entire body is just `return 0;` or `return;` or starts with `31c0c3` / `c3` with no active malicious code left), it is ALREADY NEUTRALIZED — do NOT flag it!
+5. If NO active malicious helper functions remain in the pseudo-C, set "is_clean": true and "malicious_functions": [].
+6. If the binary appears heavily packed/encrypted with no readable code, set "unpatchable_or_packed": true.
+7. For each malicious function, copy its EXACT "function_name", "va", and "file_offset" from the input metadata.
+8. Choose the safest surgical "patch_strategy":
    - "RET_ZERO": writes `31 C0 C3` (xor eax, eax; ret) at function entry — best for neutralizing malicious helper functions returning int/BOOL/HANDLE.
    - "RET_EARLY": writes `C3` (ret) at function entry — best for void functions.
    - "RET_ONE": writes `B8 01 00 00 00 C3` (mov eax, 1; ret) — best when caller expects truthy success.
