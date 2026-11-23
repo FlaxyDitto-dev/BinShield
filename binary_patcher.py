@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import tempfile
 import time
 import uuid
@@ -108,6 +109,25 @@ class QuarantineEntry:
     sha256: str
     reason: str
     timestamp: str
+
+
+@dataclass
+class PESanitizationReport:
+    input_path: str
+    output_path: str
+    success: bool
+    actions_taken: List[str] = field(default_factory=list)
+    oep_restored: bool = False
+    sections_stripped: List[str] = field(default_factory=list)
+    sections_neutralized: List[str] = field(default_factory=list)
+    tls_callbacks_neutralized: int = 0
+    caves_neutralized: int = 0
+    exports_neutralized: List[str] = field(default_factory=list)
+    overlay_stripped: bool = False
+    signatures_stripped: bool = False
+    checksum_valid: bool = False
+    integrity_ok: bool = False
+    integrity_errors: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +374,351 @@ class BinaryPatcher:
             + (" (signature stripped)" if stripped else "")
             + (f" [LIEF available={HAS_LIEF}]" if HAS_LIEF else "")
         )
+
+    @staticmethod
+    def _align_up(value: int, alignment: int) -> int:
+        if alignment <= 0:
+            return value
+        rem = value % alignment
+        return value if rem == 0 else value + (alignment - rem)
+
+    def sanitize_pe_binary(
+        self,
+        input_binary: str,
+        output_binary: str,
+        finding: Optional[Any] = None,
+    ) -> PESanitizationReport:
+        """
+        Cleanly strip or neutralize structural PE injections while preserving binary integrity:
+        - Restores hijacked AddressOfEntryPoint (OEP) when original OEP is recoverable
+        - Removes/neutralizes unauthorized TLS callbacks while preserving legitimate CRT callbacks
+        - Clears code-cave shellcode injections inside .text padding
+        - Strips trailing injected PE sections (updating NumberOfSections, SizeOfImage, and truncating)
+          or neutralizes non-trailing injected/RWX sections in-place (zeroing payload & clearing W/X flags)
+        - Strips malicious PE overlays
+        - Strips invalidated Authenticode signatures and recalculates PE OptionalHeader CheckSum
+        - Runs post-patch PE structural integrity verification
+        """
+        report = PESanitizationReport(
+            input_path=input_binary,
+            output_path=output_binary,
+            success=False,
+        )
+        if not os.path.isfile(input_binary):
+            report.integrity_errors.append(f"Input binary not found: {input_binary}")
+            return report
+
+        if finding is None:
+            from scanner import analyze_pe_file
+            finding = analyze_pe_file(input_binary, source="Manual File")
+        if finding is None:
+            report.integrity_errors.append("Input is not a valid PE binary")
+            return report
+
+        anomalies: List[Dict[str, Any]] = list(getattr(finding, "anomalies", []) or [])
+        Path(output_binary).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(input_binary, output_binary)
+
+        # Read PE header offsets once
+        with open(output_binary, "r+b") as fh:
+            dos = fh.read(64)
+            if len(dos) < 64 or dos[:2] != b"MZ":
+                report.integrity_errors.append("Invalid DOS MZ header")
+                return report
+            pe_off = struct.unpack_from("<I", dos, 0x3C)[0]
+            fh.seek(pe_off)
+            coff_hdr = fh.read(24)
+            if len(coff_hdr) < 24 or coff_hdr[:4] != b"PE\x00\x00":
+                report.integrity_errors.append("Invalid PE signature")
+                return report
+
+            num_sections = struct.unpack_from("<H", coff_hdr, 6)[0]
+            opt_hdr_size = struct.unpack_from("<H", coff_hdr, 20)[0]
+            opt_off = pe_off + 24
+            sec_table_off = opt_off + opt_hdr_size
+
+            fh.seek(opt_off)
+            opt_hdr = fh.read(opt_hdr_size)
+            sec_alignment = struct.unpack_from("<I", opt_hdr, 32)[0] if len(opt_hdr) >= 36 else 0x1000
+            ep_rva = struct.unpack_from("<I", opt_hdr, 16)[0] if len(opt_hdr) >= 20 else 0
+
+            # 1. Restore hijacked OEP first (so any injected section at the end becomes unreferenced)
+            for anom in anomalies:
+                if anom.get("type") == "OEP_HIJACK":
+                    recovered = anom.get("recovered_oep_rva")
+                    if recovered and isinstance(recovered, int) and recovered > 0:
+                        fh.seek(opt_off + 16)
+                        fh.write(struct.pack("<I", recovered))
+                        ep_rva = recovered
+                        report.oep_restored = True
+                        msg = f"Restored hijacked EntryPoint: {hex(anom['current_oep_rva'])} -> {hex(recovered)}"
+                        report.actions_taken.append(msg)
+                        self._log(f"[SANITIZE] {msg}")
+
+            # 2. Neutralize unauthorized TLS callbacks (preserve any other legitimate CRT callbacks)
+            tls_anoms = [a for a in anomalies if a.get("type") == "MALICIOUS_TLS_CALLBACK"]
+            if tls_anoms:
+                # Group by callback_table_offset to cleanly compact each table
+                by_table: Dict[int, List[Dict[str, Any]]] = {}
+                for ta in tls_anoms:
+                    by_table.setdefault(int(ta["callback_table_offset"]), []).append(ta)
+
+                for table_off, items in by_table.items():
+                    ptr_size = int(items[0].get("ptr_size", 8))
+                    ptr_fmt = "<Q" if ptr_size == 8 else "<I"
+                    mal_vas = {int(it["callback_va"]) for it in items}
+
+                    fh.seek(table_off)
+                    raw_tbl = fh.read(ptr_size * 32)
+                    existing_vas: List[int] = []
+                    for i in range(len(raw_tbl) // ptr_size):
+                        v = struct.unpack_from(ptr_fmt, raw_tbl, i * ptr_size)[0]
+                        if v == 0:
+                            break
+                        existing_vas.append(v)
+
+                    kept_vas = [v for v in existing_vas if v not in mal_vas]
+                    # Rewrite compacted table + trailing zeros
+                    new_tbl = bytearray(ptr_size * (len(existing_vas) + 1))
+                    for idx_v, v in enumerate(kept_vas):
+                        struct.pack_into(ptr_fmt, new_tbl, idx_v * ptr_size, v)
+                    fh.seek(table_off)
+                    fh.write(new_tbl)
+
+                    # Also RET-patch malicious callback entry points if in-file
+                    for it in items:
+                        cb_off = int(it.get("callback_file_offset", -1))
+                        if cb_off > 0:
+                            fh.seek(cb_off)
+                            fh.write(b"\xC3")
+                        report.tls_callbacks_neutralized += 1
+                        msg = f"Neutralized malicious TLS callback #{it['callback_index']} ({hex(it['callback_va'])})"
+                        report.actions_taken.append(msg)
+                        self._log(f"[SANITIZE] {msg}")
+
+            # 3. Neutralize code-cave shellcode inside .text padding
+            for anom in anomalies:
+                if anom.get("type") == "CODE_CAVE_SHELLCODE":
+                    cave_off = int(anom.get("file_offset", -1))
+                    cave_sz = int(anom.get("size", 0))
+                    if cave_off > 0 and cave_sz > 0:
+                        fh.seek(cave_off)
+                        fh.write(b"\x00" * cave_sz)
+                        report.caves_neutralized += 1
+                        msg = f"Cleared code-cave shellcode ({cave_sz}B @ {hex(cave_off)}) in {anom.get('section_name')}"
+                        report.actions_taken.append(msg)
+                        self._log(f"[SANITIZE] {msg}")
+
+            # 3b. Surgically neutralize suspicious exported functions in .text (RET_ZERO: 31 C0 C3)
+            for anom in anomalies:
+                if anom.get("type") == "MALICIOUS_EXPORT_FUNC":
+                    exp_off = int(anom.get("file_offset", -1))
+                    exp_name = str(anom.get("function_name", "unknown"))
+                    if exp_off > 0:
+                        fh.seek(exp_off)
+                        before = fh.read(3)
+                        if before != b"\x31\xC0\xC3":
+                            fh.seek(exp_off)
+                            fh.write(b"\x31\xC0\xC3")
+                            report.exports_neutralized.append(exp_name)
+                            msg = f"Surgically neutralized exported function '{exp_name}' @ {hex(exp_off)} [{before.hex(' ').upper()} -> 31 C0 C3]"
+                            report.actions_taken.append(msg)
+                            self._log(f"[SANITIZE] {msg}")
+
+            # 4. Strip trailing injected sections OR neutralize non-trailing injected sections in-place
+            # Read current section table entries
+            sections_meta: List[Dict[str, Any]] = []
+            for idx in range(num_sections):
+                s_hdr_off = sec_table_off + idx * 40
+                fh.seek(s_hdr_off)
+                sh = fh.read(40)
+                if len(sh) < 40:
+                    break
+                sname = sh[:8].rstrip(b"\x00").decode("utf-8", errors="ignore")
+                vsize, vaddr, rsize, rptr = struct.unpack_from("<IIII", sh, 8)
+                chars = struct.unpack_from("<I", sh, 36)[0]
+                sections_meta.append({
+                    "index": idx,
+                    "hdr_off": s_hdr_off,
+                    "name": sname,
+                    "vsize": vsize,
+                    "vaddr": vaddr,
+                    "rsize": rsize,
+                    "rptr": rptr,
+                    "chars": chars,
+                })
+
+            injected_indices = {
+                int(a["section_index"])
+                for a in anomalies
+                if a.get("type") == "INJECTED_SECTION"
+            }
+
+            # Strip trailing injected sections from the end backwards (only if EP does not point into them)
+            stripped_any_tail = False
+            while sections_meta and sections_meta[-1]["index"] in injected_indices:
+                last_sec = sections_meta[-1]
+                sec_vstart = last_sec["vaddr"]
+                sec_vend = sec_vstart + max(last_sec["vsize"], last_sec["rsize"])
+                if sec_vstart <= ep_rva < sec_vend:
+                    # OEP still points here (unrecoverable OEP) -> cannot safely strip section header
+                    break
+                # Zero section header in table
+                fh.seek(last_sec["hdr_off"])
+                fh.write(b"\x00" * 40)
+                sections_meta.pop()
+                injected_indices.discard(last_sec["index"])
+                stripped_any_tail = True
+                report.sections_stripped.append(last_sec["name"])
+                msg = f"Stripped trailing injected PE section '{last_sec['name']}' (raw={last_sec['rsize']}B)"
+                report.actions_taken.append(msg)
+                self._log(f"[SANITIZE] {msg}")
+
+            if stripped_any_tail and sections_meta:
+                new_num_sections = len(sections_meta)
+                fh.seek(pe_off + 6)
+                fh.write(struct.pack("<H", new_num_sections))
+
+                # Recalculate SizeOfImage aligned to SectionAlignment
+                max_vend = max(
+                    s["vaddr"] + max(s["vsize"], s["rsize"], 1) for s in sections_meta
+                )
+                new_size_of_image = self._align_up(max_vend, sec_alignment)
+                fh.seek(opt_off + 56)
+                fh.write(struct.pack("<I", new_size_of_image))
+
+                # Clear any DataDirectory entries (e.g. injected TLS directory) whose RVA
+                # pointed into the stripped trailing section(s)
+                opt_magic = struct.unpack_from("<H", opt_hdr, 0)[0] if len(opt_hdr) >= 2 else 0x10B
+                dd_rel = 112 if opt_magic == 0x20B else 96
+                for dd_idx in (9,):  # IMAGE_DIRECTORY_ENTRY_TLS = 9
+                    if dd_rel + (dd_idx + 1) * 8 <= len(opt_hdr):
+                        dd_rva, dd_sz = struct.unpack_from("<II", opt_hdr, dd_rel + dd_idx * 8)
+                        if dd_rva >= new_size_of_image and dd_sz > 0:
+                            fh.seek(opt_off + dd_rel + dd_idx * 8)
+                            fh.write(b"\x00" * 8)
+                            msg = f"Cleared injected TLS DataDirectory pointing to stripped RVA {hex(dd_rva)}"
+                            report.actions_taken.append(msg)
+                            self._log(f"[SANITIZE] {msg}")
+
+                # Truncate raw bytes of stripped trailing sections
+                new_raw_end = max(s["rptr"] + s["rsize"] for s in sections_meta)
+                fh.truncate(new_raw_end)
+
+            # Neutralize any remaining non-trailing injected sections in-place
+            for sec in sections_meta:
+                if sec["index"] in injected_indices:
+                    sec_vstart = sec["vaddr"]
+                    sec_vend = sec_vstart + max(sec["vsize"], sec["rsize"])
+                    if sec_vstart <= ep_rva < sec_vend:
+                        continue
+                    if sec["rptr"] > 0 and sec["rsize"] > 0:
+                        fh.seek(sec["rptr"])
+                        fh.write(b"\x00" * sec["rsize"])
+                    # Clear EXECUTE (0x20000000) and WRITE (0x80000000) flags, keep READ (0x40000000)
+                    new_chars = (sec["chars"] & ~(0x20000000 | 0x80000000)) | 0x40000000
+                    fh.seek(sec["hdr_off"] + 36)
+                    fh.write(struct.pack("<I", new_chars))
+                    report.sections_neutralized.append(sec["name"])
+                    msg = f"Neutralized injected PE section '{sec['name']}' in-place (zeroed + cleared RWX)"
+                    report.actions_taken.append(msg)
+                    self._log(f"[SANITIZE] {msg}")
+
+            # 5. Strip malicious PE overlays
+            if any(a.get("type") == "MALICIOUS_OVERLAY" for a in anomalies) and sections_meta:
+                pe_raw_end = max(s["rptr"] + s["rsize"] for s in sections_meta)
+                fh.seek(0, os.SEEK_END)
+                cur_size = fh.tell()
+                if cur_size > pe_raw_end:
+                    fh.truncate(pe_raw_end)
+                    report.overlay_stripped = True
+                    msg = f"Stripped malicious PE overlay ({cur_size - pe_raw_end} bytes @ {hex(pe_raw_end)})"
+                    report.actions_taken.append(msg)
+                    self._log(f"[SANITIZE] {msg}")
+
+        # 6. Strip invalidated Authenticode signature & recalculate PE CheckSum
+        if report.actions_taken:
+            self._strip_signature_and_fix_checksum(output_binary)
+            report.signatures_stripped = True
+
+        # 7. Post-sanitization PE structural integrity verification
+        ok, errs, csum_ok = self.verify_pe_integrity(output_binary)
+        report.integrity_ok = ok
+        report.integrity_errors = errs
+        report.checksum_valid = csum_ok
+        report.success = ok
+        return report
+
+    @staticmethod
+    def verify_pe_integrity(binary_path: str) -> Tuple[bool, List[str], bool]:
+        """
+        Verify structural integrity of a Windows PE (.exe / .dll) binary:
+        - Valid DOS MZ + PE\\0\\0 headers
+        - NumberOfSections matches section table and >= 1
+        - All section raw ranges fall within file size
+        - SizeOfImage >= max section virtual end
+        - AddressOfEntryPoint (if non-zero) falls inside a valid executable section
+        - Import/Export directories parse cleanly
+        - OptionalHeader CheckSum matches calculated PE checksum (if non-zero)
+        Returns (is_valid, error_list, checksum_valid).
+        """
+        errors: List[str] = []
+        checksum_valid = False
+        if not os.path.isfile(binary_path):
+            return False, ["File does not exist"], False
+
+        file_size = os.path.getsize(binary_path)
+        pe: Optional[pefile.PE] = None
+        try:
+            pe = pefile.PE(binary_path, fast_load=False)
+            if pe.FILE_HEADER.NumberOfSections != len(pe.sections) or len(pe.sections) == 0:
+                errors.append(
+                    f"Section count mismatch: header={pe.FILE_HEADER.NumberOfSections}, parsed={len(pe.sections)}"
+                )
+
+            max_vend = 0
+            for sec in pe.sections:
+                sname = sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
+                if sec.PointerToRawData + sec.SizeOfRawData > file_size:
+                    errors.append(
+                        f"Section '{sname}' raw range ({hex(sec.PointerToRawData + sec.SizeOfRawData)}) exceeds file size ({hex(file_size)})"
+                    )
+                vend = sec.VirtualAddress + max(sec.Misc_VirtualSize, sec.SizeOfRawData)
+                if vend > max_vend:
+                    max_vend = vend
+
+            if pe.OPTIONAL_HEADER.SizeOfImage < max_vend:
+                errors.append(
+                    f"SizeOfImage ({hex(pe.OPTIONAL_HEADER.SizeOfImage)}) < max section virtual end ({hex(max_vend)})"
+                )
+
+            ep_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
+            if ep_rva != 0:
+                ep_in_exec = False
+                for sec in pe.sections:
+                    vstart = sec.VirtualAddress
+                    vend = vstart + max(sec.Misc_VirtualSize, sec.SizeOfRawData)
+                    if vstart <= ep_rva < vend:
+                        if sec.Characteristics & IMAGE_SCN_MEM_EXECUTE:
+                            ep_in_exec = True
+                        break
+                if not ep_in_exec:
+                    errors.append(f"AddressOfEntryPoint ({hex(ep_rva)}) does not point into an executable section")
+
+            # Verify PE CheckSum
+            calc_csum = pe.generate_checksum()
+            hdr_csum = pe.OPTIONAL_HEADER.CheckSum
+            checksum_valid = (hdr_csum == 0) or (hdr_csum == calc_csum)
+            if not checksum_valid:
+                errors.append(f"PE CheckSum mismatch: header={hex(hdr_csum)}, calculated={hex(calc_csum)}")
+
+        except Exception as exc:
+            errors.append(f"PE parse failure: {exc}")
+        finally:
+            if pe is not None:
+                pe.close()
+
+        return len(errors) == 0, errors, checksum_valid
 
 
 # ---------------------------------------------------------------------------

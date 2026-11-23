@@ -17,7 +17,8 @@ import subprocess
 import winreg
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+import struct
 
 import pefile
 import psutil
@@ -90,6 +91,64 @@ PROXY_SIDELOAD_DLL_NAMES: Set[str] = {
 
 PE_SCAN_EXTENSIONS: Tuple[str, ...] = (".exe", ".dll", ".asi", ".flt", ".ocx", ".scr", ".sys")
 
+# Standard legitimate executable PE section names produced by MSVC, MinGW/GCC, Clang, Delphi, Go, Rust
+STANDARD_EXEC_SECTION_NAMES: Set[str] = {
+    ".text", "text", "code", ".code", "init", "page", ".itext", ".textbss", ".text0", ".text1",
+}
+
+# Section names strongly associated with packers or unauthorized code injection
+SUSPICIOUS_INJECTED_SECTION_PREFIXES: Tuple[str, ...] = (
+    ".inject", ".shell", ".stub", ".evil", ".payload", ".mal", ".crypt",
+    ".hook", ".cave", ".drop", ".rat", ".backd", ".hide", ".z",
+)
+
+# Exported function name fragments strongly indicative of unauthorized/malicious helpers
+SUSPICIOUS_EXPORT_FRAGMENTS: Tuple[str, ...] = (
+    "malicious", "keylog", "c2_beacon", "beacon_loop", "inject_payload",
+    "process_inject", "payload_drop", "steal_cred", "dump_cred", "ransom_",
+    "clipboard_spy", "reverse_shell", "backdoor", "exfiltrat", "shellcode",
+)
+
+PACKER_SECTION_PREFIXES: Tuple[str, ...] = (
+    "UPX", "ASPACK", "VMP", "THEMIDA", ".ENIGMA", "MEW", "PECOMPACT", "MPRESS",
+)
+
+# High-confidence shellcode byte signatures (x86/x64 PEB walks, GetPC stubs, egg/loader prologues)
+SHELLCODE_PATTERNS: List[Tuple[bytes, str]] = [
+    (b"\x65\x48\x8B\x04\x25\x60\x00\x00\x00", "x64 PEB walk (mov rax, gs:[0x60])"),
+    (b"\x65\x48\x8B\x0C\x25\x60\x00\x00\x00", "x64 PEB walk (mov rcx, gs:[0x60])"),
+    (b"\x64\xA1\x30\x00\x00\x00", "x86 PEB walk (mov eax, fs:[0x30])"),
+    (b"\x64\x8B\x35\x30\x00\x00\x00", "x86 PEB walk (mov esi, fs:[0x30])"),
+    (b"\xFC\x48\x83\xE4\xF0", "x64 shellcode prologue (cld; and rsp, -16)"),
+    (b"\xE8\x00\x00\x00\x00\x58", "GetPC shellcode stub (call $+5; pop rax/eax)"),
+    (b"\xE8\x00\x00\x00\x00\x5B", "GetPC shellcode stub (call $+5; pop rbx/ebx)"),
+    (b"\xE8\x00\x00\x00\x00\x59", "GetPC shellcode stub (call $+5; pop rcx/ecx)"),
+]
+
+# High-confidence malicious IOC strings inside PE sections or overlays
+HIGH_CONFIDENCE_IOC_STRINGS: Tuple[Tuple[bytes, str], ...] = (
+    (b"discord.com/api/webhooks", "Discord webhook exfiltration IOC"),
+    (b"api.telegram.org/bot", "Telegram bot C2/exfiltration IOC"),
+    (b"vssadmin delete shadows", "Ransomware shadow-copy deletion command"),
+    (b"add-mppreference", "Windows Defender exclusion tampering"),
+    (b"powershell -enc", "Encoded PowerShell execution"),
+    (b"powershell -nop -w hidden", "Hidden PowerShell execution"),
+    (b"invoke-expression", "PowerShell IEX dropper indicator"),
+    (b"currentversion\\run", "Registry Run persistence path"),
+    (b"mimikatz", "Credential dumper signature"),
+    (b"meterpreter", "Meterpreter RAT signature"),
+    (b"reverse_shell", "Reverse shell marker"),
+    (b"c2_beacon", "C2 beacon payload marker"),
+    (b"keylogger_hook", "Keylogger hook marker"),
+    (b"gg_injected_payload", "Injected payload marker"),
+    (b"gg_shellcode_cave", "Injected code-cave shellcode marker"),
+    (b"gg_tls_payload", "Injected TLS callback payload marker"),
+    (b"gg_overlay_payload", "Injected overlay payload marker"),
+)
+
+IMAGE_SCN_MEM_EXECUTE = 0x20000000
+IMAGE_SCN_MEM_WRITE = 0x80000000
+
 SUSPICIOUS_PATH_FRAGMENTS: Tuple[str, ...] = (
     "\\appdata\\local\\temp\\",
     "\\windows\\temp\\",
@@ -130,6 +189,7 @@ class ThreatFinding:
     suspicious_imports: List[str] = field(default_factory=list)
     indicators: List[str] = field(default_factory=list)
     persistence_ref: str = ""
+    anomalies: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -334,6 +394,390 @@ def _severity_from_score(score: int) -> str:
     return "LOW"
 
 
+def _detect_oep_return_rva(stub_bytes: bytes, stub_rva: int, text_rva_start: int, text_rva_end: int) -> Optional[int]:
+    """
+    Scan an OEP-hijack stub for a relative JMP rel32 (E9 xx xx xx xx) that jumps
+    back into the legitimate .text section, returning the recovered original OEP RVA.
+    """
+    for i in range(0, max(0, len(stub_bytes) - 4)):
+        if stub_bytes[i] == 0xE9:
+            rel32 = struct.unpack_from("<i", stub_bytes, i + 1)[0]
+            target_rva = (stub_rva + i + 5 + rel32) & 0xFFFFFFFF
+            if text_rva_start <= target_rva < text_rva_end:
+                return target_rva
+    return None
+
+
+def _find_section_for_rva(pe: pefile.PE, rva: int) -> Optional[Any]:
+    for sec in pe.sections:
+        vstart = sec.VirtualAddress
+        vsize = max(sec.Misc_VirtualSize, sec.SizeOfRawData)
+        if vstart <= rva < vstart + vsize:
+            return sec
+    return None
+
+
+def _is_standard_exec_section(sec_name: str) -> bool:
+    low = sec_name.strip().lower()
+    if low in STANDARD_EXEC_SECTION_NAMES:
+        return True
+    # MinGW / GCC long section names like "/4" are debug/DWARF, never executable
+    return False
+
+
+def _inspect_pe_anomalies(
+    pe: pefile.PE,
+    file_path: str,
+    file_size: int,
+) -> Tuple[List[Dict[str, Any]], List[str], Set[str], int, bool, float]:
+    """
+    Deep structural PE analysis detecting:
+    - RWX and non-standard/injected executable sections
+    - Entry-point (OEP) hijacking & trampoline redirection
+    - Unauthorized / injected TLS callbacks
+    - Code-cave shellcode injections inside .text padding
+    - Malicious PE overlays (appended PE/ELF/dropper/C2 payloads)
+    - High-confidence malicious IOC strings
+    Returns (anomalies, indicators, categories, added_score, is_packed, max_entropy).
+    """
+    anomalies: List[Dict[str, Any]] = []
+    indicators: List[str] = []
+    categories: Set[str] = set()
+    added_score = 0
+    is_packed = False
+    max_entropy = 0.0
+
+    image_base = pe.OPTIONAL_HEADER.ImageBase
+    is_pe32_plus = pe.OPTIONAL_HEADER.Magic == 0x20B
+    ep_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
+
+    # Identify primary .text section bounds
+    text_sec = None
+    for sec in pe.sections:
+        sname = sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore").strip().lower()
+        if sname in (".text", "text", "code", ".code"):
+            text_sec = sec
+            break
+    text_rva_start = text_sec.VirtualAddress if text_sec else 0
+    text_rva_end = (
+        text_sec.VirtualAddress + max(text_sec.Misc_VirtualSize, text_sec.SizeOfRawData)
+        if text_sec
+        else 0
+    )
+
+    injected_sec_names: Set[str] = set()
+    seen_iocs: Set[str] = set()
+    pe_raw_end = 0
+
+    # 1. Section-by-section inspection (entropy, RWX, injected exec sections, code caves, IOCs)
+    for idx, sec in enumerate(pe.sections):
+        sec_name = sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
+        sec_low = sec_name.strip().lower()
+        raw_ptr = int(sec.PointerToRawData or 0)
+        raw_size = int(sec.SizeOfRawData or 0)
+        if raw_ptr + raw_size > pe_raw_end:
+            pe_raw_end = raw_ptr + raw_size
+
+        sample_len = min(raw_size, 512 * 1024)
+        data = sec.get_data(length=sample_len) if sample_len > 0 else b""
+        ent = _shannon_entropy(data[: 256 * 1024]) if data else 0.0
+        if ent > max_entropy:
+            max_entropy = ent
+
+        chars = int(sec.Characteristics or 0)
+        is_exec = bool(chars & IMAGE_SCN_MEM_EXECUTE)
+        is_write = bool(chars & IMAGE_SCN_MEM_WRITE)
+
+        # Packer section check
+        if sec_name.upper().startswith(PACKER_SECTION_PREFIXES):
+            is_packed = True
+            added_score += 20
+            categories.add("Packed / Obfuscated")
+            indicators.append(f"Packer section detected: {sec_name}")
+
+        # Injected / non-standard executable or RWX section check
+        is_suspicious_name = sec_low.startswith(SUSPICIOUS_INJECTED_SECTION_PREFIXES)
+        is_nonstandard_exec = is_exec and not _is_standard_exec_section(sec_name)
+        is_rwx = is_exec and is_write
+
+        if is_suspicious_name or is_rwx or is_nonstandard_exec:
+            injected_sec_names.add(sec_name)
+            reason_parts = []
+            if is_rwx:
+                reason_parts.append("RWX (Writable+Executable)")
+            if is_nonstandard_exec:
+                reason_parts.append("non-standard executable section")
+            if is_suspicious_name:
+                reason_parts.append("suspicious injection section name")
+            added_score += 35 if (is_rwx or is_suspicious_name) else 25
+            categories.add("Code Injection")
+            indicators.append(f"Injected/unsafe section '{sec_name}' ({', '.join(reason_parts)})")
+            anomalies.append({
+                "type": "INJECTED_SECTION",
+                "section_name": sec_name,
+                "section_index": idx,
+                "file_offset": raw_ptr,
+                "raw_size": raw_size,
+                "virtual_address": sec.VirtualAddress,
+                "is_rwx": is_rwx,
+                "is_last_section": idx == len(pe.sections) - 1,
+                "reason": ", ".join(reason_parts),
+            })
+
+        # Code-cave shellcode scan inside executable sections
+        if is_exec and data:
+            # Check for shellcode byte signatures
+            for sig, sig_desc in SHELLCODE_PATTERNS:
+                pos = data.find(sig)
+                if pos != -1:
+                    cave_off = raw_ptr + pos
+                    # Avoid flagging standard .text unless preceded by null padding or in injected section
+                    preceding_nulls = pos >= 16 and data[pos - 16 : pos] == b"\x00" * 16
+                    if sec_name in injected_sec_names or preceding_nulls or pos > max(0, len(data) - 4096):
+                        added_score += 35
+                        categories.add("Shellcode Injection")
+                        indicators.append(f"Shellcode signature in '{sec_name}' @ {hex(cave_off)}: {sig_desc}")
+                        anomalies.append({
+                            "type": "CODE_CAVE_SHELLCODE",
+                            "section_name": sec_name,
+                            "file_offset": cave_off,
+                            "va": image_base + sec.VirtualAddress + pos,
+                            "size": min(256, len(data) - pos),
+                            "signature": sig_desc,
+                        })
+                        break
+
+        # High-confidence IOC string scan across section data
+        if data:
+            low_data = data.lower()
+            for ioc_bytes, ioc_desc in HIGH_CONFIDENCE_IOC_STRINGS:
+                if ioc_bytes in low_data and ioc_desc not in seen_iocs:
+                    seen_iocs.add(ioc_desc)
+                    added_score += 28
+                    categories.add("Malicious Payload / IOC")
+                    indicators.append(f"Malicious IOC string in '{sec_name}': {ioc_desc}")
+                    pos = low_data.find(ioc_bytes)
+                    anomalies.append({
+                        "type": "SUSPICIOUS_IOC",
+                        "section_name": sec_name,
+                        "file_offset": raw_ptr + pos if pos >= 0 else raw_ptr,
+                        "ioc": ioc_bytes.decode("ascii", errors="ignore"),
+                        "description": ioc_desc,
+                    })
+
+    if max_entropy >= 7.25:
+        is_packed = True
+        added_score += 15
+        indicators.append(f"High section entropy ({max_entropy:.2f}) — possibly packed/encrypted")
+
+    # 2. Entry-Point (OEP) Hijacking Detection
+    if ep_rva > 0:
+        ep_sec = _find_section_for_rva(pe, ep_rva)
+        if ep_sec is not None:
+            ep_sec_name = ep_sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
+            ep_file_off = pe.get_offset_from_rva(ep_rva)
+            if ep_sec_name in injected_sec_names or not _is_standard_exec_section(ep_sec_name):
+                recovered_oep = None
+                if ep_file_off is not None and ep_file_off >= 0:
+                    try:
+                        with open(file_path, "rb") as f:
+                            f.seek(ep_file_off)
+                            stub = f.read(512)
+                        if text_sec is not None:
+                            recovered_oep = _detect_oep_return_rva(stub, ep_rva, text_rva_start, text_rva_end)
+                    except OSError:
+                        pass
+                added_score += 40
+                categories.add("Entry-Point Hijack")
+                oep_note = f" (recoverable OEP={hex(recovered_oep)})" if recovered_oep else ""
+                indicators.append(
+                    f"Hijacked EntryPoint {hex(ep_rva)} points to non-standard section '{ep_sec_name}'{oep_note}"
+                )
+                anomalies.append({
+                    "type": "OEP_HIJACK",
+                    "section_name": ep_sec_name,
+                    "current_oep_rva": ep_rva,
+                    "current_oep_file_offset": ep_file_off or 0,
+                    "recovered_oep_rva": recovered_oep,
+                })
+            elif ep_file_off is not None and ep_file_off >= 0:
+                # Check if OEP in .text starts with an immediate JMP rel32 into an injected section
+                try:
+                    with open(file_path, "rb") as f:
+                        f.seek(ep_file_off)
+                        ep_head = f.read(16)
+                    if len(ep_head) >= 5 and ep_head[0] == 0xE9:
+                        rel32 = struct.unpack_from("<i", ep_head, 1)[0]
+                        jmp_target_rva = (ep_rva + 5 + rel32) & 0xFFFFFFFF
+                        jmp_sec = _find_section_for_rva(pe, jmp_target_rva)
+                        if jmp_sec is not None:
+                            jmp_sec_name = jmp_sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
+                            if jmp_sec_name in injected_sec_names:
+                                added_score += 35
+                                categories.add("Entry-Point Hijack")
+                                indicators.append(
+                                    f"EntryPoint trampoline at {hex(ep_rva)} redirects to injected section '{jmp_sec_name}'"
+                                )
+                                anomalies.append({
+                                    "type": "OEP_TRAMPOLINE",
+                                    "section_name": jmp_sec_name,
+                                    "oep_file_offset": ep_file_off,
+                                    "target_rva": jmp_target_rva,
+                                })
+                except OSError:
+                    pass
+
+    # 3. TLS Callback Injection Detection
+    try:
+        tls_idx = pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_TLS"]
+        if len(pe.OPTIONAL_HEADER.DATA_DIRECTORY) > tls_idx:
+            tls_dir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[tls_idx]
+            if tls_dir.VirtualAddress != 0 and tls_dir.Size > 0:
+                tls_file_off = pe.get_offset_from_rva(tls_dir.VirtualAddress)
+                if tls_file_off is not None and tls_file_off >= 0:
+                    with open(file_path, "rb") as f:
+                        f.seek(tls_file_off)
+                        tls_raw = f.read(40 if is_pe32_plus else 24)
+                        if (is_pe32_plus and len(tls_raw) >= 32) or (not is_pe32_plus and len(tls_raw) >= 16):
+                            cb_va = (
+                                struct.unpack_from("<Q", tls_raw, 24)[0]
+                                if is_pe32_plus
+                                else struct.unpack_from("<I", tls_raw, 12)[0]
+                            )
+                            if cb_va > image_base:
+                                cb_table_rva = cb_va - image_base
+                                cb_table_off = pe.get_offset_from_rva(cb_table_rva)
+                                ptr_size = 8 if is_pe32_plus else 4
+                                ptr_fmt = "<Q" if is_pe32_plus else "<I"
+                                if cb_table_off is not None and cb_table_off >= 0:
+                                    f.seek(cb_table_off)
+                                    table_bytes = f.read(ptr_size * 32)
+                                    for cb_i in range(len(table_bytes) // ptr_size):
+                                        fn_va = struct.unpack_from(ptr_fmt, table_bytes, cb_i * ptr_size)[0]
+                                        if fn_va == 0:
+                                            break
+                                        if fn_va <= image_base:
+                                            continue
+                                        fn_rva = fn_va - image_base
+                                        fn_sec = _find_section_for_rva(pe, fn_rva)
+                                        fn_off = pe.get_offset_from_rva(fn_rva)
+                                        if fn_sec is None or fn_off is None:
+                                            continue
+                                        fn_sec_name = fn_sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
+                                        # Check if callback targets injected/RWX section or contains shellcode/IOCs
+                                        is_mal_cb = fn_sec_name in injected_sec_names or not _is_standard_exec_section(fn_sec_name)
+                                        if not is_mal_cb:
+                                            f.seek(fn_off)
+                                            cb_code = f.read(128)
+                                            cb_low = cb_code.lower()
+                                            if any(sig in cb_code for sig, _ in SHELLCODE_PATTERNS) or any(
+                                                ioc in cb_low for ioc, _ in HIGH_CONFIDENCE_IOC_STRINGS
+                                            ):
+                                                is_mal_cb = True
+                                        if is_mal_cb:
+                                            added_score += 38
+                                            categories.add("TLS Callback Injection")
+                                            indicators.append(
+                                                f"Unauthorized TLS callback #{cb_i} -> {hex(fn_va)} in '{fn_sec_name}'"
+                                            )
+                                            anomalies.append({
+                                                "type": "MALICIOUS_TLS_CALLBACK",
+                                                "callback_index": cb_i,
+                                                "callback_table_offset": cb_table_off,
+                                                "callback_entry_offset": cb_table_off + cb_i * ptr_size,
+                                                "ptr_size": ptr_size,
+                                                "callback_va": fn_va,
+                                                "callback_file_offset": fn_off,
+                                                "section_name": fn_sec_name,
+                                            })
+    except Exception:
+        pass
+
+    # 4. Malicious PE Overlay Detection (excluding valid Authenticode cert table)
+    try:
+        cert_off = 0
+        cert_size = 0
+        sec_idx = pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]
+        if len(pe.OPTIONAL_HEADER.DATA_DIRECTORY) > sec_idx:
+            sdir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[sec_idx]
+            cert_off = int(sdir.VirtualAddress or 0)
+            cert_size = int(sdir.Size or 0)
+
+        overlay_start = pe_raw_end
+        overlay_end = cert_off if (cert_off >= pe_raw_end and cert_size > 0) else file_size
+        overlay_size = max(0, overlay_end - overlay_start)
+
+        if overlay_size >= 64:
+            with open(file_path, "rb") as f:
+                f.seek(overlay_start)
+                ov_sample = f.read(min(overlay_size, 256 * 1024))
+            ov_low = ov_sample.lower()
+            ov_reasons: List[str] = []
+            if b"MZ" in ov_sample[:64] and b"PE\x00\x00" in ov_sample[:1024]:
+                ov_reasons.append("embedded PE executable in overlay")
+            if ov_sample[:4] == b"\x7fELF":
+                ov_reasons.append("embedded ELF binary in overlay")
+            for ioc_bytes, ioc_desc in HIGH_CONFIDENCE_IOC_STRINGS:
+                if ioc_bytes in ov_low:
+                    ov_reasons.append(ioc_desc)
+                    break
+            for sig, sig_desc in SHELLCODE_PATTERNS:
+                if sig in ov_sample:
+                    ov_reasons.append(sig_desc)
+                    break
+            if not ov_reasons and overlay_size >= 1024:
+                ov_ent = _shannon_entropy(ov_sample)
+                if ov_ent >= 7.5 and (b"http://" in ov_low or b"powershell" in ov_low or b"payload" in ov_low):
+                    ov_reasons.append(f"high-entropy payload overlay ({ov_ent:.2f})")
+
+            if ov_reasons:
+                added_score += 32
+                categories.add("Malicious Overlay")
+                indicators.append(
+                    f"Malicious PE overlay ({overlay_size} bytes @ {hex(overlay_start)}): {'; '.join(ov_reasons)}"
+                )
+                anomalies.append({
+                    "type": "MALICIOUS_OVERLAY",
+                    "overlay_offset": overlay_start,
+                    "overlay_size": overlay_size,
+                    "reasons": ov_reasons,
+                })
+    except Exception:
+        pass
+
+    # 5. Suspicious Exported Functions (for surgical .text neutralization on DLLs)
+    try:
+        if hasattr(pe, "DIRECTORY_ENTRY_EXPORT") and pe.DIRECTORY_ENTRY_EXPORT:
+            for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+                if not exp.name:
+                    continue
+                exp_name = exp.name.decode("utf-8", errors="ignore")
+                exp_low = exp_name.lower()
+                if any(frag in exp_low for frag in SUSPICIOUS_EXPORT_FRAGMENTS):
+                    exp_rva = int(exp.address or 0)
+                    exp_off = pe.get_offset_from_rva(exp_rva) if exp_rva > 0 else None
+                    if exp_off is not None and exp_off >= 0:
+                        # Check if already neutralized (starts with 31 C0 C3 or C3)
+                        with open(file_path, "rb") as f:
+                            f.seek(exp_off)
+                            head = f.read(3)
+                        if head != b"\x31\xC0\xC3" and head[:1] != b"\xC3":
+                            added_score += 30
+                            categories.add("Malicious Exported Function")
+                            indicators.append(f"Suspicious exported function '{exp_name}' @ {hex(exp_off)}")
+                            anomalies.append({
+                                "type": "MALICIOUS_EXPORT_FUNC",
+                                "function_name": exp_name,
+                                "rva": exp_rva,
+                                "va": image_base + exp_rva,
+                                "file_offset": exp_off,
+                            })
+    except Exception:
+        pass
+
+    return anomalies, indicators, categories, added_score, is_packed, max_entropy
+
+
 # ---------------------------------------------------------------------------
 # PE Static Heuristic Inspector
 # ---------------------------------------------------------------------------
@@ -346,17 +790,22 @@ def analyze_pe_file(
 ) -> Optional[ThreatFinding]:
     """
     Perform fast static PE analysis on a Windows binary (.exe / .dll).
-    Returns a ThreatFinding with heuristic score and indicators.
+    Detects suspicious APIs, masquerading, proxy DLL sideloading, RWX/injected sections,
+    OEP hijacking, unauthorized TLS callbacks, code-cave shellcode, malicious overlays,
+    and high-confidence IOC strings.
+    Returns a ThreatFinding with heuristic score, indicators, and structured anomalies.
     """
     if not file_path or not os.path.isfile(file_path):
         return None
 
     name = os.path.basename(file_path)
     norm_lower = os.path.normpath(file_path).lower()
+    file_size = os.path.getsize(file_path)
     score = 0
     indicators: List[str] = []
     categories: Set[str] = set()
     suspicious_imports: List[str] = []
+    anomalies: List[Dict[str, Any]] = []
     signed = False
     is_packed = False
     max_entropy = 0.0
@@ -367,32 +816,31 @@ def analyze_pe_file(
         indicators.append(f"Masquerading system binary '{name}' outside Windows directory")
         categories.add("Masquerading")
 
-    # 2. Suspicious directory check
+    # 2. Suspicious directory check (light weight alone; amplified if actual threat indicators exist)
     in_suspicious_dir = _is_in_suspicious_dir(file_path)
     if in_suspicious_dir:
-        score += 18
+        score += 8
         indicators.append("Located in user-writable/temp directory")
 
-    # 3. Parse PE headers, imports, signature, and section entropy
+    # 3. Parse PE headers, imports, signature, and deep structural anomalies
     try:
         pe = pefile.PE(file_path, fast_load=True)
         pe.parse_data_directories(
             directories=[
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"],
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_TLS"],
             ]
         )
 
         signed = is_pe_signed(file_path, pe_obj=pe)
         if not signed:
-            if in_suspicious_dir:
-                score += 22
-                indicators.append("Unsigned PE in Temp/AppData/Public folder")
-            else:
-                score += 8
-                indicators.append("Binary is not digitally signed")
+            score += 8
+            indicators.append("Binary is not digitally signed")
 
         # Inspect imports
+        benign_overlap_only = False
         if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
             found_apis: Set[str] = set()
             for entry in pe.DIRECTORY_ENTRY_IMPORT:
@@ -406,46 +854,64 @@ def analyze_pe_file(
                             categories.add(cat)
 
             if suspicious_imports:
-                # Weight injection & keylogger APIs higher
                 high_risk_cats = {"Keylogger / Spyware", "Process Injection / RAT"}
-                if categories & high_risk_cats:
-                    score += min(35, 12 + 5 * len(suspicious_imports))
+                # Single benign-overlap API (e.g. IsDebuggerPresent in CRT, or WSAStartup/connect in clean net client)
+                # should not cause false positives on clean tools without additional indicators.
+                benign_overlap_only = set(a.lower() for a in suspicious_imports).issubset({
+                    "isdebuggerpresent", "wsastartup", "connect", "send", "recv",
+                    "cryptacquirecontexta", "cryptacquirecontextw", "openprocess",
+                }) and len(suspicious_imports) <= 3
+                if categories & high_risk_cats and not benign_overlap_only:
+                    score += min(40, 18 + 6 * len(suspicious_imports))
+                elif benign_overlap_only:
+                    score += 6
                 else:
-                    score += min(25, 6 + 3 * len(suspicious_imports))
+                    score += min(30, 10 + 4 * len(suspicious_imports))
                 preview = ", ".join(suspicious_imports[:6])
                 suffix = f" (+{len(suspicious_imports) - 6} more)" if len(suspicious_imports) > 6 else ""
                 indicators.append(f"Suspicious APIs: {preview}{suffix}")
 
-        # Section entropy (bounded 256 KB sample per section for O(1) RAM on multi-GB game EXEs)
-        for sec in pe.sections:
-            sec_name = sec.Name.rstrip(b"\x00").decode("utf-8", errors="ignore")
-            sample_len = min(int(sec.SizeOfRawData or 0), 256 * 1024)
-            data = sec.get_data(length=sample_len) if sample_len > 0 else b""
-            ent = _shannon_entropy(data)
-            if ent > max_entropy:
-                max_entropy = ent
-            if sec_name.upper().startswith(("UPX", "ASPACK", "VMP", "THEMIDA", ".ENIGMA")):
-                is_packed = True
-                score += 20
-                indicators.append(f"Packer section detected: {sec_name}")
+        # Deep structural PE injection & anomaly analysis
+        pe_anomalies, anom_indicators, anom_cats, anom_score, is_packed, max_entropy = _inspect_pe_anomalies(
+            pe, file_path, file_size
+        )
+        anomalies.extend(pe_anomalies)
+        indicators.extend(anom_indicators)
+        categories.update(anom_cats)
+        score += anom_score
 
-        if max_entropy >= 7.25:
-            is_packed = True
-            score += 15
-            indicators.append(f"High section entropy ({max_entropy:.2f}) — possibly packed/encrypted")
+        # Amplify unsigned + temp/AppData risk ONLY when real threat signals are present
+        has_real_threat_signal = bool(
+            anomalies
+            or is_packed
+            or (not benign_overlap_only and (categories - {"Anti-Debug / Anti-VM"}))
+        )
+        if not signed and in_suspicious_dir and has_real_threat_signal:
+            score += 18
+            indicators.append("Unsigned PE with threat indicators in Temp/AppData/Public folder")
 
         # DLL Sideloading / Proxy DLL check (common attack vector in leaked game folders)
         if name.lower() in PROXY_SIDELOAD_DLL_NAMES and not _is_in_legit_windows_dir(file_path):
-            if not signed and (categories & {"Keylogger / Spyware", "Process Injection / RAT", "C2 / Network Dropper", "Persistence / Privilege", "Execution / Shell"}):
+            high_risk_proxy_cats = {
+                "Keylogger / Spyware", "Process Injection / RAT", "C2 / Network Dropper",
+                "Persistence / Privilege", "Execution / Shell", "Code Injection",
+                "Shellcode Injection", "Entry-Point Hijack", "TLS Callback Injection",
+                "Malicious Overlay", "Malicious Payload / IOC",
+            }
+            if not signed and (categories & high_risk_proxy_cats):
                 score += 25
                 categories.add("DLL Sideloading / Proxy")
-                indicators.append(f"Unsigned proxy/sideloaded DLL '{name}' with high-risk imports")
+                indicators.append(f"Unsigned proxy/sideloaded DLL '{name}' with high-risk indicators")
+                anomalies.append({
+                    "type": "PROXY_SIDELOAD",
+                    "dll_name": name,
+                    "reason": "Unsigned proxy DLL with malicious indicators",
+                })
             elif not signed:
                 indicators.append(f"Unsigned proxy DLL '{name}' (verify if legitimate mod/loader)")
 
         pe.close()
     except pefile.PEFormatError:
-        # Not a valid PE file
         return None
     except PermissionError:
         indicators.append("Access denied reading PE (run as Administrator)")
@@ -479,6 +945,7 @@ def analyze_pe_file(
         suspicious_imports=sorted(suspicious_imports),
         indicators=indicators,
         persistence_ref=persistence_ref,
+        anomalies=anomalies,
     )
 
 
@@ -529,6 +996,7 @@ class SystemScanner:
                     suspicious_imports=list(base.suspicious_imports),
                     indicators=list(base.indicators),
                     persistence_ref=pref,
+                    anomalies=list(base.anomalies),
                 )
             res = analyze_pe_file(path, source=source, pid=pid, persistence_ref=pref)
             pe_cache[norm] = res

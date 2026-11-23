@@ -280,6 +280,11 @@ object ApkScanner {
                             val ent = shannonEntropy(bytes)
                             if (ent > maxEntropy) maxEntropy = ent
                             val arch = name.split("/").getOrNull(1) ?: "unknown"
+                            val soBase = name.substringAfterLast("/").lowercase()
+                            if (soBase in setOf("libfrida-gadget.so", "libfrida.so", "libinject.so", "libhook.so", "libpayload.so", "libsubstrate.so")) {
+                                score += 35
+                                indicators.add("Unauthorized injected native library detected: $name")
+                            }
                             val elfSecs = ElfPatcher.parseExecutableSections(bytes)
                             val libStrings = extractAsciiStrings(bytes, minLen = 6, maxStrings = 30)
                             suspiciousStrings.addAll(libStrings)
@@ -293,6 +298,20 @@ object ApkScanner {
                                     suspiciousStrings = libStrings,
                                 )
                             )
+                        }
+                    } else if ((name.startsWith("assets/") || name.startsWith("res/raw/")) && !entry.isDirectory) {
+                        val head = readBounded(zip.getInputStream(entry), 4096)
+                        if (head.size >= 4) {
+                            val isElf = head[0] == 0x7F.toByte() && head[1] == 'E'.code.toByte() &&
+                                head[2] == 'L'.code.toByte() && head[3] == 'F'.code.toByte()
+                            val isDex = head[0] == 'd'.code.toByte() && head[1] == 'e'.code.toByte() &&
+                                head[2] == 'x'.code.toByte() && head[3] == '\n'.code.toByte()
+                            val isPe = head[0] == 'M'.code.toByte() && head[1] == 'Z'.code.toByte() &&
+                                String(head, Charsets.ISO_8859_1).contains("PE\u0000\u0000")
+                            if (isElf || isDex || isPe) {
+                                score += 32
+                                indicators.add("Hidden executable/DEX dropper payload inside $name")
+                            }
                         }
                     }
                 }

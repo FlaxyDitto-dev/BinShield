@@ -97,10 +97,18 @@ object PeAnalyzerPatcher {
         val execSections = mutableListOf<ElfSectionInfo>()
         var maxEntropy = 0.0
         var hasRwx = false
+        var hasInjectedExecSection = false
+        var hasOepHijack = false
+        var hasMaliciousOverlay = false
         var hasAuthenticode = false
+        var peRawEnd = 0L
+        var epRva = 0L
+        var textVStart = 0L
+        var textVEnd = 0L
         var arch = "unknown"
         val matchedApis = linkedSetOf<String>()
         val asciiStrings = linkedSetOf<String>()
+        val standardExecNames = setOf(".text", "text", "code", ".code", "init", "page", ".itext")
 
         try {
             RandomAccessFile(peFile, "r").use { raf ->
@@ -145,6 +153,9 @@ object PeAnalyzerPatcher {
                 } else {
                     0x400000L
                 }
+                if (optBytes.size >= 20) {
+                    epRva = obb.getInt(16).toLong() and 0xFFFFFFFFL
+                }
 
                 val dataDirRel = if (isPe32Plus) 112 else 96
                 if (dataDirRel + 40 <= optBytes.size) {
@@ -172,6 +183,15 @@ object PeAnalyzerPatcher {
                     val isExec = (chars and IMAGE_SCN_MEM_EXECUTE) != 0
                     val isWrite = (chars and IMAGE_SCN_MEM_WRITE) != 0
                     if (isExec && isWrite) hasRwx = true
+                    val secLow = secName.lowercase()
+                    if (isExec && secLow !in standardExecNames) hasInjectedExecSection = true
+                    if (secLow in standardExecNames && textVEnd == 0L) {
+                        textVStart = virtualAddr
+                        textVEnd = virtualAddr + maxOf(sbb.getInt(8).toLong() and 0xFFFFFFFFL, rawSize)
+                    }
+                    if (rawPtr + rawSize > peRawEnd) {
+                        peRawEnd = rawPtr + rawSize
+                    }
 
                     if (rawPtr > 0L && rawSize > 0L && rawPtr < fileLen) {
                         val toRead = minOf(entropySampleBuf.size.toLong(), rawSize, fileLen - rawPtr).toInt()
@@ -193,6 +213,22 @@ object PeAnalyzerPatcher {
                                 isExecutable = true,
                             )
                         )
+                    }
+                }
+                if (epRva > 0L && textVEnd > 0L && (epRva < textVStart || epRva >= textVEnd)) {
+                    hasOepHijack = true
+                }
+                if (!hasAuthenticode && peRawEnd > 0L && fileLen - peRawEnd >= 64L) {
+                    val ovLen = minOf(4096L, fileLen - peRawEnd).toInt()
+                    val ovBuf = ByteArray(ovLen)
+                    raf.seek(peRawEnd)
+                    raf.readFully(ovBuf)
+                    val ovText = String(ovBuf, Charsets.ISO_8859_1).lowercase()
+                    if ((ovBuf[0] == 'M'.code.toByte() && ovBuf[1] == 'Z'.code.toByte()) ||
+                        ovText.contains("powershell") || ovText.contains("gg_overlay_payload") ||
+                        ovText.contains("discord.com/api/webhooks")
+                    ) {
+                        hasMaliciousOverlay = true
                     }
                 }
             }
@@ -230,6 +266,18 @@ object PeAnalyzerPatcher {
         if (hasRwx) {
             score += 20
             indicators.add("Writable + Executable (RWX) PE section detected (packer / shellcode risk)")
+        }
+        if (hasInjectedExecSection) {
+            score += 30
+            indicators.add("Non-standard executable PE section detected (code injection risk)")
+        }
+        if (hasOepHijack) {
+            score += 35
+            indicators.add("EntryPoint (OEP) points outside primary .text section (OEP hijack risk)")
+        }
+        if (hasMaliciousOverlay) {
+            score += 30
+            indicators.add("Malicious PE overlay payload detected after last section")
         }
         if (maxEntropy >= 7.2) {
             score += 20
