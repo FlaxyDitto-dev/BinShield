@@ -202,16 +202,10 @@ def cmd_ai_scan(args: argparse.Namespace) -> int:
         print(f"Error: file not found: {target}", file=sys.stderr)
         return 2
 
-    from custom_model import GhidraGuardSecNetClient
+    from custom_model import GhidraGuardSecNetClient, format_scan_for_ai
 
     static_res = _scan_one(target)
-    anoms = ",".join(a.get("type", "") for a in static_res.get("anomalies", [])) or "0"
-    apis = ",".join(static_res.get("suspicious_imports", [])[:12])
-    summary_text = (
-        f"{'APK_SCAN' if static_res.get('type') == 'apk' else 'PE_SCAN'} {target.name} "
-        f"anoms={anoms} apis={apis} "
-        f"indicators={'; '.join(static_res.get('indicators', [])[:6])}"
-    )
+    summary_text = format_scan_for_ai(static_res, filename=target.name)
 
     client = GhidraGuardSecNetClient(device=args.device, log_callback=(None if args.json else print))
     ai_pred = client.predict(summary_text)

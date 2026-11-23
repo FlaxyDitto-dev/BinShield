@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 MODEL_NAME = "GhidraGuard-SecNet-v1"
-MODEL_RELEASE_TAG = "v1.1.1"
+MODEL_RELEASE_TAG = "v1.1.3"
 MODEL_REPO = "FlaxyDitto-dev/GhidraGuard"
 MODEL_WEIGHTS_FILENAME = "GhidraGuard-SecNet-v1.safetensors"
 MODEL_ONNX_FILENAME = "GhidraGuard-SecNet-v1.onnx"
@@ -87,6 +87,28 @@ PATCH_STRATEGIES: List[str] = [
 ]
 
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:/-]{1,48}|0x[0-9a-fA-F]+|\d+|[^\sA-Za-z0-9_]")
+
+
+def format_scan_for_ai(static_res: Dict[str, Any], filename: str = "") -> str:
+    """
+    Canonical feature text format shared identically between training and live inference
+    (cli.py, main.py, Colab) so GhidraGuard-SecNet-v1 has zero train/test skew.
+    """
+    kind = "APK_SCAN" if static_res.get("type") == "apk" else "PE_SCAN"
+    name = filename or str(static_res.get("name") or "unknown")
+    score = int(static_res.get("risk_score", 0))
+    sev = str(static_res.get("severity", "LOW"))
+    signed = str(bool(static_res.get("signed", False))).lower()
+    packed = str(bool(static_res.get("is_packed", False))).lower()
+    anoms_list = [str(a.get("type", "")) for a in (static_res.get("anomalies") or []) if a.get("type")]
+    anoms = ",".join(anoms_list) if anoms_list else "none"
+    apis_list = list(static_res.get("suspicious_imports") or [])[:12]
+    apis = ",".join(apis_list) if apis_list else "none"
+    inds = "; ".join(list(static_res.get("indicators") or [])[:5]) or "none"
+    return (
+        f"{kind} name={name} score={score} severity={sev} signed={signed} "
+        f"packed={packed} anoms={anoms} apis={apis} indicators={inds}"
+    )
 
 
 def get_default_model_dir() -> Path:
