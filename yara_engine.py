@@ -86,7 +86,17 @@ class YaraRuleEngine:
     """Loads all .yar/.yara files from rules/ and scans files in bounded memory."""
 
     def __init__(self, rules_dir: Optional[Path] = None):
-        self.rules_dir = rules_dir or (Path(__file__).resolve().parent / "rules")
+        if rules_dir is not None:
+            self.rules_dir = rules_dir
+        else:
+            import sys
+            cands = []
+            if getattr(sys, "_MEIPASS", None):
+                cands.append(Path(sys._MEIPASS) / "rules")
+            if getattr(sys, "frozen", False):
+                cands.append(Path(sys.executable).resolve().parent / "rules")
+            cands.append(Path(__file__).resolve().parent / "rules")
+            self.rules_dir = next((c for c in cands if c.is_dir()), cands[-1])
         self._rules: List[_ParsedRule] = []
         self.reload()
 

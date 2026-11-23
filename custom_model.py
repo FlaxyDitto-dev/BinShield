@@ -16,6 +16,7 @@ import json
 import math
 import os
 import re
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -315,17 +316,28 @@ def ensure_custom_model_files(
     log_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Path, Path]:
     """
-    Locate local GhidraGuard-SecNet-v1 weights (.onnx or .safetensors) + vocab,
-    or auto-download them from GitHub Releases Fastly CDN if not cached locally.
+    Locate preinstalled GhidraGuard-SecNet-v2 weights (.onnx or .safetensors) + vocab
+    (bundled inside PyInstaller _MEIPASS, MSI install folder, or repo models/),
+    falling back to fast GitHub Releases CDN auto-download only if not preinstalled.
     """
     log = log_callback or (lambda msg: None)
     w_name = MODEL_ONNX_FILENAME if prefer_onnx else MODEL_WEIGHTS_FILENAME
     w_url = MODEL_ONNX_URL if prefer_onnx else MODEL_WEIGHTS_URL
 
-    repo_models = Path(__file__).resolve().parent / "models" / MODEL_NAME
-    if (repo_models / w_name).is_file() and (repo_models / MODEL_VOCAB_FILENAME).is_file():
-        return repo_models / w_name, repo_models / MODEL_VOCAB_FILENAME
+    # 1. Check preinstalled locations (PyInstaller bundle, MSI install dir, repo models/)
+    search_roots: List[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        search_roots.append(Path(meipass) / "models" / MODEL_NAME)
+    if getattr(sys, "frozen", False):
+        search_roots.append(Path(sys.executable).resolve().parent / "models" / MODEL_NAME)
+    search_roots.append(Path(__file__).resolve().parent / "models" / MODEL_NAME)
 
+    for cand in search_roots:
+        if (cand / w_name).is_file() and (cand / MODEL_VOCAB_FILENAME).is_file():
+            return cand / w_name, cand / MODEL_VOCAB_FILENAME
+
+    # 2. Check user cache or auto-download from fast GitHub CDN
     cache_dir = model_dir or get_default_model_dir()
     weights_path = cache_dir / w_name
     vocab_path = cache_dir / MODEL_VOCAB_FILENAME

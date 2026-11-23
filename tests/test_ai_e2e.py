@@ -73,7 +73,9 @@ def export_onnx_from_safetensors() -> Path:
 
 
 def main() -> None:
-    export_onnx_from_safetensors()
+    onnx_path = REPO_ROOT / "models" / MODEL_NAME / MODEL_ONNX_FILENAME
+    if not onnx_path.is_file():
+        export_onnx_from_safetensors()
 
     ai_gpu = GhidraGuardSecNetClient(device="gpu", log_callback=print)
     ai_ort = GhidraGuardSecNetClient(device="onnx", log_callback=print)

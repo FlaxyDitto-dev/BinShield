@@ -1,6 +1,8 @@
-# GhidraGuard (`v2.0.0`)
+# GhidraGuard (`v2.1.0`)
 
 **GhidraGuard** is a **100% free, local, offline** security scanner, disassembler, sandbox, and surgical binary sanitizer for **Windows, Linux, macOS, Google Colab, and Android** (`.exe`, `.dll`, `.apk`, `.so`, `.elf`, `.dylib`).
+
+- **One-Click Windows `.msi` Installer (`GhidraGuard-v2.1.0-Setup-x64.msi`):** Automatically installs everything with **prebuilt Python 3.13 + preinstalled `GhidraGuard-SecNet-v2` INT8 AI model + YARA rules + Capstone + Start Menu/Desktop shortcuts + System `PATH`** (`ghidraguard` works in any terminal immediately, 100% offline with zero downloads required!).
 
 - **Custom Trained Multimodal AI (`GhidraGuard-SecNet-v2`):** 13.9M-parameter Transformer trained on NVIDIA RTX 5060 Ti across Ghidra pseudo-C, raw x86/x64/ARM64 opcodes, PE/APK/ELF/Mach-O structure, and YARA hits — exported as **INT8 Quantized ONNX (~14 MB, 2–3× faster on CPU/NPU)** + **FP16 Safetensors (~26.5 MB for CUDA/MPS/XPU)** with fast auto-download from GitHub Releases CDN.
 - **Full-Stack Security Suite (`v2.0.0`):**
