@@ -1,140 +1,160 @@
-# GhidraGuard (`v1.0.0` — Stable Release)
+# GhidraGuard (`v1.0.0`)
 
-> **Built on November 21–23, 2026 using Gemini 4 Neon.**
->
-> **Status:** Stable Release (`v1.0.0`). 100% free, local, offline security, reverse-engineering, and surgical binary-sanitization suite for Windows (`.exe` / `.dll`) and Android (`.apk` / `.so`). Always keep backups before deploying patched binaries.
+**GhidraGuard** is a **100% free, local, offline** security scanner, reverse-engineering assistant, and surgical binary sanitizer for **Windows (`.exe` / `.dll`)** and **Android (`.apk` / `.so`)**.
 
-**GhidraGuard** is a **100% free, local, offline** security, reverse-engineering, and AI-assisted binary-patching suite — available for **Windows Desktop** (Python `CustomTkinter` + Ghidra Headless + CUDA & Flash Attention) and **Android** (native Kotlin + Jetpack Compose in [`android/`](android/)).
-
-- **Zero Ollama / Zero External Server / Zero Cloud:** Directly loads and runs local AI models **in-process** — PyTorch CUDA + Flash Attention on Windows Desktop, and Google MediaPipe `LlmInference` (Mobile GPU / CPU, zero `INTERNET` permission) on Android.
-- **Direct CUDA & Flash Attention Engine (`cuda_engine.py`):**
-  - Auto-detects NVIDIA CUDA GPUs (VRAM, CUDA version, compute capability, `bf16`, `flash_attn` FlashAttention-2, and PyTorch native CUDA SDPA Flash Attention).
-  - Loads local HuggingFace models (default `Qwen/Qwen2.5-Coder-3B-Instruct` or any local model folder) directly into VRAM using `flash_attention_2` or PyTorch `SDPBackend.FLASH_ATTENTION` in `bf16`/`fp16`/`4bit-nf4` (with automatic CPU fallback).
-- **Android Version (`android/`):** 100% offline native Kotlin + Jetpack Compose app (`com.flaxyditto.ghidraguard`, **zero `INTERNET` permission**) with direct on-device MediaPipe LLM inference (`.task` / `.litertlm` / `.bin` on Mobile GPU or CPU), built-in static analyzer fallback, installed app & APK/DEX/ELF **+ Windows PE (`.exe`/`.dll`)** heuristic scanning, surgical ARM64/ARMv7/x86_64 ELF & x86/x64 Windows PE `.text` patching (with Authenticode stripping & PE checksum recalculation), XOR-neutralized Quarantine Vault, and network & device posture monitor.
-- **Ghidra Headless Integration:** Automatically discovers `analyzeHeadless.bat` up to two directory levels deep under `C:\*` (`C:\<folder>\<subfolder>\support\analyzeHeadless.bat`) with manual path override.
-- **Surgical Safety Guardrails:** Hard-blocks patches targeting entrypoints (`main`/`WinMain`/`DllMain`), CRT/standard libraries (`__mingw_*`, `malloc`, `memcpy`), print/logging helpers (`printf`, `puts`), and GUI window message loops (`WndProc`, `DefWindowProc`, `BeginPaint`).
+- **Zero Cloud / Zero Ollama / Zero External Server:** Runs 100% offline with direct in-process PyTorch CUDA + Flash Attention on Windows and on-device MediaPipe LLM inference (zero `INTERNET` permission) on Android.
+- **Integrity-Preserving Sanitization:** Detects and strips unauthorized code injections, RWX sections, hijacked entry points (OEP), unauthorized TLS callbacks, code-cave shellcode, malicious overlays, malicious DLL exports, injected secondary DEX payloads, unauthorized `.so` libraries, and hidden `assets/` droppers — while reconstructing headers, checksums, and manifests so legitimate apps continue running normally.
+- **Prebuilt Releases:** Download `GhidraGuard-GUI.exe`, `GhidraGuard-CLI.exe`, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/GhidraGuard/releases/latest).
 
 ---
 
-## How GhidraGuard Works (Architecture & Pipeline Visualization)
+## How to Use
 
-```mermaid
-flowchart TD
-    A["Windows Target (.exe / .dll)<br/>Scanner: Processes, DLLs, HKCU/HKLM Run, Scheduled Tasks"] --> B["Static PE Heuristics (pefile + WinVerifyTrust)<br/>Risk Score, Unsigned Check, Suspicious IAT, Entropy"]
-    B -->|Quarantine / Delete| Q["XOR-Neutralized Quarantine Vault<br/>(Restore or Permanent Delete)"]
-    B -->|Deep Decompile & Patch| C["Isolated Workspace Copy"]
-    C --> D["Ghidra Headless (analyzeHeadless.bat)<br/>GhidraGuardExport.java: Imports, Strings, XREFs, Pseudo-C, VAs & File Offsets"]
-    D --> E["Protected-Symbol Filter<br/>Blocks CRT, Libs, stdio/printf, GUI Callbacks"]
-    E --> F["Direct In-Process Local AI (PyTorch CUDA + Flash Attention)<br/>Default Model: Qwen/Qwen2.5-Coder-3B-Instruct (Zero Ollama / Zero Server)"]
-    F --> G{"Local AI Verdict"}
-    G -->|"0 Active Threats (CLEAN)"| H["Verified Clean Binary Ready<br/>(One-Click Deploy with .bak Backup)"]
-    G -->|"Packed / Unpatchable or Pass > 5"| Q
-    G -->|"Malicious Functions Found"| I["Surgical PE .text Patcher (binary_patcher.py)<br/>RET_ZERO (31 C0 C3) / RET_EARLY (C3) / NOP / Jcc Flip"]
-    I --> J["Strip Invalidated Authenticode Signature<br/>+ Recalculate PE OptionalHeader CheckSum"]
-    J -->|"Next Pass (Max 5 Passes)"| D
+### 1. Windows GUI (`GhidraGuard-GUI.exe` or `main.py`)
+1. Launch **`GhidraGuard-GUI.exe`** (runs elevated with UAC for process/DLL/registry/scheduled-task inspection) or run from source:
+   ```powershell
+   python main.py
+   ```
+2. **Threat Scanner:** Run a full system scan (processes, loaded DLLs, startup registry keys, scheduled tasks) or pick a single `.exe` / `.dll` or game/app folder to scan recursively.
+3. **AI Decompile & Patch Lab:**
+   - Select any flagged binary to decompile with **Ghidra Headless** (auto-discovered under `C:\*`, or click **Auto-Setup** to install JDK 21 + Ghidra automatically).
+   - Audit pseudo-C with the local CUDA + Flash Attention AI model (`Qwen/Qwen2.5-Coder-3B-Instruct` by default) and apply surgical `.text` patches with automatic Authenticode stripping, PE `CheckSum` recalculation, and `.bak` backup creation.
+4. **Quarantine Vault:** Safely isolate unpatchable threats with XOR neutralization (restore or permanently delete at any time).
+5. **Live Network Monitor:** Inspect active TCP/UDP connections mapped to PIDs and executable paths.
+
+### 2. Windows Headless CLI (`GhidraGuard-CLI.exe` or `cli.py`)
+Works on Windows PE binaries (`.exe`, `.dll`, `.sys`, `.scr`, `.asi`, `.ocx`), Android `.apk` files, and entire folders.
+
+```powershell
+# Scan a single file (.exe, .dll, or .apk)
+.\GhidraGuard-CLI.exe scan "C:\path\to\app.exe"
+
+# Recursively scan a folder (add --json for machine-readable output)
+.\GhidraGuard-CLI.exe scan "C:\path\to\game_folder" --json
+
+# Sanitize an infected binary to a clean output file (never overwrites original unless specified)
+.\GhidraGuard-CLI.exe sanitize "C:\path\to\infected.exe" -o "C:\path\to\cleaned.exe"
+.\GhidraGuard-CLI.exe sanitize "C:\path\to\infected.apk" -o "C:\path\to\cleaned.apk"
+
+# Verify structural integrity (PE headers/sections/CheckSum or APK ZIP/AXML/DEX/ELF)
+.\GhidraGuard-CLI.exe verify "C:\path\to\cleaned.exe"
+.\GhidraGuard-CLI.exe verify "C:\path\to\cleaned.apk"
 ```
 
+*(If running from Python source instead of the compiled `.exe`, replace `.\GhidraGuard-CLI.exe` with `python cli.py`.)*
+
+### 3. Android App (`GhidraGuard` APK)
+1. Install the built APK on Android 8.0+ (API 26+). The app requests **zero `INTERNET` permission** and works 100% offline.
+2. **Scanner Tab:** Scan installed apps, pick a manual `.apk`, or pick a Windows `.exe` / `.dll` file from device storage.
+3. **Patch Lab Tab:** Inspect flagged native `.so` ELF libraries or Windows PE `.text` sections, run on-device MediaPipe LLM auditing (optional `.task`/`.litertlm`/`.bin` model) or the built-in static analyzer, and export a sanitized copy.
+4. **Network & Vault Tabs:** Review device security posture and manage XOR-neutralized quarantined files.
+
 ---
 
-## Benchmark & Mock Performance Visualization
+## How to Build the Windows `.exe` Binaries
 
-To validate the full pipeline end-to-end without publishing any malware or mock binaries, GhidraGuard was tested locally against two **100% inert, harmless simulation PE binaries** (compiled with `-O0`, where all Win32 API calls were guarded behind a `volatile int g_inert_flag = 0` so nothing ever executed against the OS). The mock source and binaries are intentionally excluded from this repository.
+### Prerequisites
+- **Windows 10/11 (64-bit)**
+- **Python 3.11–3.13** (`py -3.13` recommended)
+- Optional (for local AI decompile/audit in GUI): **NVIDIA CUDA GPU** + PyTorch CUDA (`requirements-cuda.txt`) and **Ghidra** (or run `python auto_setup.py`)
 
-### Multi-Pass Convergence Overview (`Ghidra 12.1.4` + `Ollama qwen2.5-coder:3b`)
-
-```mermaid
-flowchart LR
-    subgraph S1["Inert Mock #1 (Keylogger / C2 / Persistence)"]
-        S1P1["Pass 1<br/>Patched 3 funcs:<br/>mock_keylogger_hook<br/>mock_c2_beacon<br/>mock_persistence_install"] --> S1P2["Pass 2<br/>Re-decompiled<br/>Verdict: CLEAN"]
-    end
-
-    subgraph S2["Inert Mock #2 (Injector / Dropper / Ransomware / Spyware)"]
-        S2P1["Pass 1<br/>Patched 3 funcs:<br/>mock_process_injector<br/>mock_payload_dropper<br/>mock_clipboard_spy"] --> S2P2["Pass 2<br/>Patched 1 func:<br/>mock_file_encryptor"] --> S2P3["Pass 3<br/>Re-decompiled<br/>Verdict: CLEAN"]
-    end
+### Option A: One-Click Build (`build.bat`)
+```powershell
+git clone https://github.com/FlaxyDitto-dev/GhidraGuard.git
+cd GhidraGuard
+.\build.bat
 ```
+This automatically creates `.venv`, installs dependencies from `requirements.txt`, and builds both standalone executables:
+- `dist\GhidraGuard-GUI.exe` (desktop GUI with UAC manifest)
+- `dist\GhidraGuard-CLI.exe` (headless CLI)
 
-### Detailed Patch & Runtime Verification Results
-
-#### Test Fixture #1 (Keylogger, C2 Beacon, Registry Persistence + Benign Calculator)
-- **Passes to `CLEAN`:** 2 passes
-- **Surgical `.text` Patches Applied:**
-
-| Pass | Function | PE File Offset | Before Bytes | After Bytes | Strategy |
-| --- | --- | --- | --- | --- | --- |
-| 1 | `mock_keylogger_hook` | `0xaf4` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-| 1 | `mock_c2_beacon` | `0xb6a` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-| 1 | `mock_persistence_install` | `0xbf3` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-
-- **Runtime Result After Patching:** `mock_keylogger_hook`, `mock_c2_beacon`, and `mock_persistence_install` all returned **`NEUTRALIZED (ret=0)`**, while `benign_calculator(19, 23)` remained untouched and returned **`42`**.
-
-#### Test Fixture #2 (Process Injector, Payload Dropper, Ransomware Crypto, Clipboard Spy + Benign Health Check)
-- **Passes to `CLEAN`:** 3 passes (**4/4** simulated threats neutralized)
-- **Surgical `.text` Patches Applied:**
-
-| Pass | Function | PE File Offset | Before Bytes | After Bytes | Strategy |
-| --- | --- | --- | --- | --- | --- |
-| 1 | `mock_process_injector` | `0xab4` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-| 1 | `mock_payload_dropper` | `0xbc2` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-| 1 | `mock_clipboard_spy` | `0xd35` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-| 2 | `mock_file_encryptor` | `0xc55` | `55 48 89` | `31 C0 C3` | `RET_ZERO` (`xor eax, eax; ret`) |
-
-- **Runtime Result After Patching:**
-```text
---- Verification Summary ---
-  mock_process_injector  : NEUTRALIZED (ret=0)
-  mock_payload_dropper   : NEUTRALIZED (ret=0)
-  mock_file_encryptor    : NEUTRALIZED (ret=0)
-  mock_clipboard_spy     : NEUTRALIZED (ret=0)
-  benign_health_check()  : 777 (expected 777)
-```
-
----
-
-## Project Modules
-
-| Module | Description |
-| --- | --- |
-| `main.py` | Dark-mode glassmorphic `CustomTkinter` desktop UI: Threat Scanner, AI Decompile & Patch Lab (pass-by-pass viewer + hex diff summary), Live Network Monitor, System Repair (`sfc /scannow`, `DISM`), Quarantine Vault, Settings, and Real-Time Terminal Log. |
-| `scanner.py` | Scans running processes, loaded user-space DLLs, `HKCU`/`HKLM` `Run`/`RunOnce` keys, Scheduled Tasks, and active TCP/UDP connections (`psutil`, `winreg`, `pefile`, Win32 `WinVerifyTrust`). |
-| `ghidra_engine.py` | Auto-discovers `analyzeHeadless.bat` on `C:\*`, copies targets into an isolated workspace, runs the embedded `GhidraGuardExport.java` post-script with protected-symbol filtering, and verifies PE file offsets with `pefile`. |
-| `ai_auditor.py` | Direct in-process `DirectLocalAIClient` (zero Ollama / zero HTTP server) with CUDA GPU offload, Flash Attention 32K+ context scaling, strict JSON patch parsing, CRT/print/GUI safety guardrails, and max-5-pass iterative re-verification loop. |
-| `cuda_engine.py` | NVIDIA CUDA & Flash Attention hardware detector, direct PyTorch `flash_attention_2` / SDPA Flash Attention inference engine (`bf16`/`fp16`/`4bit-nf4` + CPU fallback), local HF cache discovery, and CUDA micro-benchmark self-test. |
-| `auto_setup.py` | One-click automatic bootstrapper (CLI + GUI): checks and auto-downloads portable Eclipse Temurin JDK 21+, official NSA Ghidra ZIP, and PyTorch CUDA + Transformers stack if missing. |
-| `binary_patcher.py` | Applies verified byte patches strictly inside executable PE sections, strips/neutralizes injected PE sections, restores hijacked OEP, removes malicious TLS callbacks, clears code-cave shellcode & overlays, surgically neutralizes malicious DLL exports (`31 C0 C3`), strips invalidated Authenticode signatures, recalculates PE `CheckSum`, verifies structural PE integrity, and manages backups + XOR-neutralized Quarantine Vault. |
-| `apk_engine.py` | Pure-Python offline Android `.apk` analyzer, sanitizer & integrity verifier: parses/sanitizes binary AXML `AndroidManifest.xml`, validates DEX SHA-1/Adler-32 checksums, detects & strips injected secondary `classesN.dex`, unauthorized `.so` libs, and `assets/` droppers, surgically patches ELF `.so` stubs (ARM64/ARMv7/x86_64), strips invalidated v1 signatures, and preserves uncompressed `resources.arsc`. |
-| `cli.py` | Standalone headless CLI (`scan`, `sanitize`, `verify`, `--json`) for Windows PE (`.exe`/`.dll`) and Android (`.apk`) binaries and recursive folder audits. |
-| `tests/batch_qa_suite.py` | Automated 210-sample real binary QA validation pipeline (`75 .exe`, `65 .dll`, `70 .apk`) verifying detection accuracy, sanitization clearance, structural integrity, and real runtime execution (`100.0%` accuracy, `0` FP, `0` regressions). |
-| `android/` | 100% offline native Android version (Kotlin + Jetpack Compose, minSdk 26 / targetSdk 36, **zero `INTERNET` permission**): direct on-device MediaPipe `LlmInference` (Mobile GPU / CPU for `.task`/`.litertlm`/`.bin` models), built-in static analyzer fallback, installed app & APK/DEX/ELF scanner, surgical ARM64/ARMv7/x86_64 ELF `.text` patcher, XOR-neutralized Quarantine Vault, and network & device posture monitor. |
-
----
-
-## Quick Start & Building
-
-### Prerequisites (Windows Desktop)
-1. **Windows 10/11 (64-bit)** with Python 3.11–3.13 (and an NVIDIA CUDA GPU for Flash Attention acceleration, or CPU fallback).
-2. **Ghidra** extracted under `C:\` (up to 2 levels deep, e.g., `C:\Ghidra\ghidra_12.1.4\support\analyzeHeadless.bat`).
-3. **No Ollama or external LLM server required** — GhidraGuard loads local HuggingFace models (`Qwen/Qwen2.5-Coder-3B-Instruct` or any local model folder) directly in-process via PyTorch CUDA + Flash Attention.
-
-### Run from Source (Windows)
+### Option B: Manual PyInstaller Build
 ```powershell
 pip install -r requirements.txt
-# Install PyTorch CUDA + Transformers for direct in-process CUDA + Flash Attention inference:
+
+# Build GUI executable
+pyinstaller --noconsole --onefile --uac-admin --name "GhidraGuard-GUI" ^
+  --collect-all customtkinter ^
+  --exclude-module torch --exclude-module transformers --exclude-module accelerate ^
+  --exclude-module sympy --exclude-module numpy --exclude-module safetensors --exclude-module tokenizers ^
+  --clean main.py
+
+# Build CLI executable
+pyinstaller --console --onefile --name "GhidraGuard-CLI" ^
+  --exclude-module customtkinter --exclude-module tkinter ^
+  --exclude-module torch --exclude-module transformers --exclude-module accelerate ^
+  --exclude-module sympy --exclude-module numpy --exclude-module safetensors --exclude-module tokenizers ^
+  --clean cli.py
+```
+
+*(To run from source with CUDA + Flash Attention AI enabled:)*
+```powershell
+pip install -r requirements.txt
 pip install --index-url https://download.pytorch.org/whl/cu128 torch
 pip install -r requirements-cuda.txt
 python main.py
 ```
 
-### Build Android Edition (`android/`)
+---
+
+## How to Build the Android `.apk`
+
+### Prerequisites
+- **JDK 17 or JDK 21** (`JAVA_HOME` set)
+- **Android SDK** (API 36 / Build-Tools) with `ANDROID_HOME` or `android/local.properties` (`sdk.dir=...`) configured
+
+### Build Debug APK
 ```powershell
 cd android
 .\gradlew.bat assembleDebug
 ```
-Outputs `android\app\build\outputs\apk\debug\app-debug.apk` (bundles the native MediaPipe on-device LLM runtime with zero `INTERNET` permission).
-
-### Compile Standalone GUI & CLI `.exe` Binaries
-```bat
-build.bat
+Output APK:
+```text
+android\app\build\outputs\apk\debug\app-debug.apk
 ```
-Compiles both standalone Windows executables:
-- `dist\GhidraGuard-GUI.exe` (dark-mode CustomTkinter desktop app with UAC elevation manifest)
-- `dist\GhidraGuard-CLI.exe` (headless CLI: `scan`, `sanitize`, `verify`, `--json`)
+
+### Build Release APK
+```powershell
+cd android
+.\gradlew.bat assembleRelease
+```
+Output APK:
+```text
+android\app\build\outputs\apk\release\app-release-unsigned.apk
+```
+*(Sign the release APK with `apksigner` or your keystore in Android Studio before installing on a device.)*
+
+---
+
+## Running the Automated Test Suites
+
+### Windows / Cross-Platform 210-Sample QA Suite (`.exe`, `.dll`, `.apk`)
+Requires `gcc` on `PATH` and Python 3.11–3.13 (`pefile`, `psutil`):
+```powershell
+python tests\batch_qa_suite.py
+```
+Compiles and tests 210 real binaries (`75 .exe`, `65 .dll`, `70 .apk`), verifying detection accuracy, sanitization clearance, structural integrity, and real runtime execution, and writes reports to `tests/QA_BATCH_REPORT.md` and `tests/qa_batch_report.json`.
+
+### Android Kotlin Unit Tests
+```powershell
+cd android
+.\gradlew.bat testDebugUnitTest
+```
+
+---
+
+## Project Structure
+
+| File / Folder | Purpose |
+| --- | --- |
+| `main.py` | Windows dark-mode `CustomTkinter` desktop GUI |
+| `cli.py` | Headless CLI (`scan`, `sanitize`, `verify`, `--json`) |
+| `scanner.py` | Windows process/DLL/registry/task/folder scanner & deep PE anomaly detector |
+| `binary_patcher.py` | Surgical PE `.text` patcher, structural sanitizer, CheckSum fixer & Quarantine Vault |
+| `apk_engine.py` | Pure-Python offline Android `.apk` analyzer, AXML/DEX/ELF sanitizer & integrity verifier |
+| `ghidra_engine.py` | Ghidra Headless auto-discovery & Java pseudo-C export bridge |
+| `ai_auditor.py` / `cuda_engine.py` | Direct in-process PyTorch CUDA + Flash Attention multi-pass AI auditor |
+| `auto_setup.py` | Automatic bootstrapper for JDK 21, Ghidra, and PyTorch CUDA |
+| `build.bat` | One-click PyInstaller builder for `GhidraGuard-GUI.exe` & `GhidraGuard-CLI.exe` |
+| `android/` | 100% offline native Kotlin + Jetpack Compose Android edition |
+| `tests/batch_qa_suite.py` | Automated 210-sample real binary QA validation pipeline |
