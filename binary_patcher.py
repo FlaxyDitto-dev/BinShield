@@ -352,18 +352,17 @@ class BinaryPatcher:
 
             f.seek(0)
             checksum = 0
-            chunk_size = 1024 * 1024  # even multiple of 2 bytes
+            chunk_size = 64 * 1024  # 64 KB even multiple of 2 bytes; guarantees < 2^32 before fold
             while True:
                 chunk = f.read(chunk_size)
                 if not chunk:
                     break
                 if len(chunk) & 1:
                     chunk += b"\x00"
-                # Fast word sum using memoryview('H')
-                for word in memoryview(chunk).cast("H"):
-                    checksum += word
-                checksum = (checksum & 0xFFFF) + (checksum >> 16)
-                checksum = (checksum & 0xFFFF) + (checksum >> 16)
+                # Fast word sum using memoryview('H') + exact 16-bit ones'-complement fold
+                checksum += sum(memoryview(chunk).cast("H"))
+                while checksum > 0xFFFF:
+                    checksum = (checksum & 0xFFFF) + (checksum >> 16)
 
             new_csum = (checksum + file_size) & 0xFFFFFFFF
             f.seek(csum_off)
@@ -670,7 +669,15 @@ class BinaryPatcher:
         file_size = os.path.getsize(binary_path)
         pe: Optional[pefile.PE] = None
         try:
-            pe = pefile.PE(binary_path, fast_load=False)
+            pe = pefile.PE(binary_path, fast_load=True)
+            pe.parse_data_directories(
+                directories=[
+                    pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
+                    pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
+                    pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_TLS"],
+                    pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"],
+                ]
+            )
             if pe.FILE_HEADER.NumberOfSections != len(pe.sections) or len(pe.sections) == 0:
                 errors.append(
                     f"Section count mismatch: header={pe.FILE_HEADER.NumberOfSections}, parsed={len(pe.sections)}"
@@ -705,12 +712,35 @@ class BinaryPatcher:
                 if not ep_in_exec:
                     errors.append(f"AddressOfEntryPoint ({hex(ep_rva)}) does not point into an executable section")
 
-            # Verify PE CheckSum
-            calc_csum = pe.generate_checksum()
+            # Verify PE CheckSum directly against on-disk bytes (avoids pefile fast_load=False bug on >20MB PEs)
+            csum_off = pe.OPTIONAL_HEADER.get_field_absolute_offset("CheckSum")
             hdr_csum = pe.OPTIONAL_HEADER.CheckSum
-            checksum_valid = (hdr_csum == 0) or (hdr_csum == calc_csum)
-            if not checksum_valid:
-                errors.append(f"PE CheckSum mismatch: header={hex(hdr_csum)}, calculated={hex(calc_csum)}")
+            if hdr_csum == 0:
+                checksum_valid = True
+            else:
+                checksum = 0
+                pos = 0
+                with open(binary_path, "rb") as f:
+                    while True:
+                        chunk = f.read(64 * 1024)
+                        if not chunk:
+                            break
+                        c_end = pos + len(chunk)
+                        if pos <= csum_off < c_end or pos < csum_off + 4 <= c_end:
+                            buf = bytearray(chunk)
+                            for b_i in range(max(pos, csum_off), min(c_end, csum_off + 4)):
+                                buf[b_i - pos] = 0
+                            chunk = bytes(buf)
+                        if len(chunk) & 1:
+                            chunk += b"\x00"
+                        checksum += sum(memoryview(chunk).cast("H"))
+                        while checksum > 0xFFFF:
+                            checksum = (checksum & 0xFFFF) + (checksum >> 16)
+                        pos = c_end
+                calc_csum = (checksum + file_size) & 0xFFFFFFFF
+                checksum_valid = hdr_csum == calc_csum
+                if not checksum_valid:
+                    errors.append(f"PE CheckSum mismatch: header={hex(hdr_csum)}, calculated={hex(calc_csum)}")
 
         except Exception as exc:
             errors.append(f"PE parse failure: {exc}")

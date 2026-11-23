@@ -481,7 +481,8 @@ def _inspect_pe_anomalies(
         sample_len = min(raw_size, 512 * 1024)
         data = sec.get_data(length=sample_len) if sample_len > 0 else b""
         ent = _shannon_entropy(data[: 256 * 1024]) if data else 0.0
-        if ent > max_entropy:
+        # Exclude .rsrc (icons/PNGs/compressed assets) from packer entropy tracking
+        if sec_low != ".rsrc" and ent > max_entropy:
             max_entropy = ent
 
         chars = int(sec.Characteristics or 0)
