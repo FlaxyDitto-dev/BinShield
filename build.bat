@@ -33,18 +33,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [*] Compiling GhidraGuard-GUI.exe with UAC Administrator manifest...
+echo [*] Compiling GhidraGuard-GUI.exe with UAC Administrator manifest + ONNX Runtime AI...
 ".venv\Scripts\pyinstaller.exe" ^
     --noconsole ^
     --onefile ^
     --uac-admin ^
     --name "GhidraGuard-GUI" ^
     --collect-all customtkinter ^
+    --collect-all onnxruntime ^
     --exclude-module torch ^
     --exclude-module transformers ^
     --exclude-module accelerate ^
     --exclude-module sympy ^
-    --exclude-module numpy ^
     --exclude-module safetensors ^
     --exclude-module tokenizers ^
     --clean ^
@@ -55,18 +55,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [*] Compiling GhidraGuard-CLI.exe (headless CLI)...
+echo [*] Compiling GhidraGuard-CLI.exe (headless CLI + self-contained ONNX Runtime AI)...
 ".venv\Scripts\pyinstaller.exe" ^
     --console ^
     --onefile ^
     --name "GhidraGuard-CLI" ^
+    --collect-all onnxruntime ^
     --exclude-module customtkinter ^
     --exclude-module tkinter ^
     --exclude-module torch ^
     --exclude-module transformers ^
     --exclude-module accelerate ^
     --exclude-module sympy ^
-    --exclude-module numpy ^
     --exclude-module safetensors ^
     --exclude-module tokenizers ^
     --clean ^

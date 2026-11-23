@@ -15,24 +15,26 @@ fi
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 
-echo "[*] Building GhidraGuard-GUI-Linux..."
+echo "[*] Building GhidraGuard-GUI-Linux (with self-contained ONNX Runtime AI)..."
 .venv/bin/pyinstaller \
     --noconsole \
     --onefile \
     --name "GhidraGuard-GUI-Linux" \
     --collect-all customtkinter \
+    --collect-all onnxruntime \
     --exclude-module torch --exclude-module transformers --exclude-module accelerate \
-    --exclude-module sympy --exclude-module numpy --exclude-module safetensors --exclude-module tokenizers \
+    --exclude-module sympy --exclude-module safetensors --exclude-module tokenizers \
     --clean main.py
 
-echo "[*] Building GhidraGuard-CLI-Linux..."
+echo "[*] Building GhidraGuard-CLI-Linux (with self-contained ONNX Runtime AI)..."
 .venv/bin/pyinstaller \
     --console \
     --onefile \
     --name "GhidraGuard-CLI-Linux" \
+    --collect-all onnxruntime \
     --exclude-module customtkinter --exclude-module tkinter \
     --exclude-module torch --exclude-module transformers --exclude-module accelerate \
-    --exclude-module sympy --exclude-module numpy --exclude-module safetensors --exclude-module tokenizers \
+    --exclude-module sympy --exclude-module safetensors --exclude-module tokenizers \
     --clean cli.py
 
 chmod +x dist/GhidraGuard-GUI-Linux dist/GhidraGuard-CLI-Linux
