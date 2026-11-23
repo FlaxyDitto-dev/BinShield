@@ -49,6 +49,7 @@ from scanner import (
     analyze_pe_file,
     get_active_connections,
 )
+from updater import APP_VERSION, check_for_updates, download_update
 
 
 # ---------------------------------------------------------------------------
@@ -82,21 +83,26 @@ SEVERITY_COLORS = {
 
 def is_admin() -> bool:
     try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        if os.name == "nt":
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        return hasattr(os, "geteuid") and os.geteuid() == 0
     except Exception:
         return False
 
 
 class SettingsStore:
-    """Persists local GhidraGuard settings in %LOCALAPPDATA%\\GhidraGuard\\settings.json."""
+    """Persists local GhidraGuard settings across Windows, Linux, and macOS."""
 
     def __init__(self) -> None:
-        base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "GhidraGuard"
+        if os.name == "nt":
+            base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "GhidraGuard"
+        else:
+            base = Path.home() / ".ghidraguard"
         base.mkdir(parents=True, exist_ok=True)
         self.path = base / "settings.json"
         self.data: Dict[str, Any] = {
             "ghidra_headless_path": "",
-            "llm_model": DEFAULT_LOCAL_MODEL,
+            "llm_model": DEFAULT_AUTO_MODEL,
             "use_cuda": True,
             "flash_attention": True,
             "cuda_precision": "bf16",
@@ -104,6 +110,7 @@ class SettingsStore:
             "max_passes": 5,
             "ghidra_timeout": 300,
             "auto_quarantine": True,
+            "auto_update": True,
         }
         self.load()
 
@@ -188,6 +195,7 @@ class GhidraGuardApp(ctk.CTk):
         else:
             self.log("[GHIDRA] analyzeHeadless.bat not auto-detected on C:\\ — configure in Settings.")
         self._refresh_models_async(silent=True)
+        self.after(2000, self._check_updates_background)
 
     # -----------------------------------------------------------------------
     # Root Layout: Sidebar + Main Workspace + Persistent Terminal Console
@@ -1784,6 +1792,43 @@ class GhidraGuardApp(ctk.CTk):
         short = Path(model).name[:20]
         self.lbl_ai_status.configure(text=f"Local AI: {short}", text_color=ACCENT_GREEN)
         self.log("[SETTINGS] Direct local AI & CUDA Flash Attention configuration saved.")
+
+    def _check_updates_background(self) -> None:
+        """Automatic background update check for Desktop GUI (Windows / Linux / macOS)."""
+        if not self.settings.data.get("auto_update", True):
+            return
+
+        def _worker() -> None:
+            res = check_for_updates(variant="gui")
+            if res.error or not res.update_available:
+                return
+
+            def _prompt() -> None:
+                self.log(f"[UPDATE] New GhidraGuard v{res.latest_version} available (current v{res.current_version}).")
+                ans = messagebox.askyesno(
+                    "GhidraGuard Update Available",
+                    f"A new version of GhidraGuard (v{res.latest_version}) is available!\n"
+                    f"Current version: v{res.current_version}\n\n"
+                    f"Download the update now from GitHub Releases?",
+                )
+                if ans:
+                    def _dl() -> None:
+                        try:
+                            path = download_update(res, log_callback=self.log)
+                            self.after(
+                                0,
+                                lambda: messagebox.showinfo(
+                                    "Update Downloaded",
+                                    f"GhidraGuard v{res.latest_version} downloaded to:\n{path}",
+                                ),
+                            )
+                        except Exception as exc:
+                            self.log(f"[UPDATE] Download error: {exc}")
+                    threading.Thread(target=_dl, daemon=True).start()
+
+            self.after(0, _prompt)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     @staticmethod
     def _set_textbox(widget: ctk.CTkTextbox, text: str) -> None:

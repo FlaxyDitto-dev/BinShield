@@ -1,0 +1,53 @@
+name: Build Cross-Platform Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Tk & build Linux GUI + CLI binaries
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-tk
+          chmod +x build_linux.sh
+          ./build_linux.sh
+      - name: Smoke test Linux CLI
+        run: ./dist/GhidraGuard-CLI-Linux --version
+      - name: Upload Linux release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/GhidraGuard-GUI-Linux dist/GhidraGuard-CLI-Linux --clobber
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build macOS GUI + CLI binaries
+        run: |
+          chmod +x build_macos.sh
+          ./build_macos.sh
+          cd dist && zip -r GhidraGuard-GUI-macOS.zip GhidraGuard-GUI-macOS.app || true
+      - name: Smoke test macOS CLI
+        run: ./dist/GhidraGuard-CLI-macOS --version
+      - name: Upload macOS release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/GhidraGuard-CLI-macOS dist/GhidraGuard-GUI-macOS.zip --clobber

@@ -6,6 +6,8 @@ Usage:
     python cli.py scan <file_or_folder> [--json]
     python cli.py sanitize <input_file> [-o <output_file>] [--json]
     python cli.py verify <file> [--json]
+    python cli.py update [--check] [--json]
+    python cli.py ai-scan <file> [--json]
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from typing import Any, Dict, List
 from apk_engine import analyze_apk_file, sanitize_apk, verify_apk_integrity
 from binary_patcher import BinaryPatcher
 from scanner import PE_SCAN_EXTENSIONS, analyze_pe_file
+from updater import APP_VERSION, check_for_updates, download_update
 
 ALL_SUPPORTED_EXTS = PE_SCAN_EXTENSIONS + (".apk",)
 
@@ -149,8 +152,86 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    """Explicit CLI update command (CLI never auto-updates on normal commands)."""
+    res = check_for_updates(variant="cli")
+    out: Dict[str, Any] = asdict(res)
+    if res.error:
+        if args.json:
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"[UPDATE] Check failed: {res.error}", file=sys.stderr)
+        return 1
+
+    if not res.update_available:
+        if args.json:
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"[UPDATE] GhidraGuard CLI v{res.current_version} is already up to date.")
+        return 0
+
+    if args.check:
+        if args.json:
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"[UPDATE] New version available: v{res.latest_version} (current v{res.current_version})")
+            print(f"         Run `ghidraguard update` to download ({res.release_url})")
+        return 0
+
+    try:
+        dl_path = download_update(res, log_callback=(None if args.json else print))
+        out["downloaded_path"] = str(dl_path)
+        if args.json:
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"[UPDATE] Ready at: {dl_path}")
+        return 0
+    except Exception as exc:
+        out["download_error"] = str(exc)
+        if args.json:
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"[UPDATE] Download failed: {exc}", file=sys.stderr)
+        return 1
+
+
+def cmd_ai_scan(args: argparse.Namespace) -> int:
+    """Run custom trained GhidraGuard-SecNet-v1 AI model (auto-downloads on first run)."""
+    target = Path(args.target)
+    if not target.is_file():
+        print(f"Error: file not found: {target}", file=sys.stderr)
+        return 2
+
+    from custom_model import GhidraGuardSecNetClient
+
+    static_res = _scan_one(target)
+    anoms = ",".join(a.get("type", "") for a in static_res.get("anomalies", [])) or "0"
+    apis = ",".join(static_res.get("suspicious_imports", [])[:12])
+    summary_text = (
+        f"{'APK_SCAN' if static_res.get('type') == 'apk' else 'PE_SCAN'} {target.name} "
+        f"anoms={anoms} apis={apis} "
+        f"indicators={'; '.join(static_res.get('indicators', [])[:6])}"
+    )
+
+    client = GhidraGuardSecNetClient(log_callback=(None if args.json else print))
+    ai_pred = client.predict(summary_text)
+    payload = {"file": str(target), "static_score": static_res.get("risk_score", 0), "ai": ai_pred}
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"[AI] Model    : {ai_pred['model']}")
+        print(f"[AI] Verdict  : {'MALICIOUS' if ai_pred['is_malicious'] else 'CLEAN'} (prob={ai_pred['malicious_probability']*100:.1f}%)")
+        print(f"[AI] Category : {ai_pred['category']} ({ai_pred['category_confidence']*100:.1f}%)")
+        print(f"[AI] Strategy : {ai_pred['patch_strategy']} ({ai_pred['strategy_confidence']*100:.1f}%)")
+    return 0
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="ghidraguard", description="GhidraGuard Headless Security CLI")
+    parser = argparse.ArgumentParser(
+        prog="ghidraguard",
+        description=f"GhidraGuard v{APP_VERSION} Headless Security CLI (Windows / Linux / macOS / Colab)",
+    )
+    parser.add_argument("--version", action="version", version=f"GhidraGuard {APP_VERSION}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_scan = sub.add_parser("scan", help="Scan a PE/APK file or folder recursively")
@@ -168,6 +249,16 @@ def main() -> int:
     p_ver.add_argument("target", help="Target .exe/.dll/.apk file")
     p_ver.add_argument("--json", action="store_true", help="Output JSON")
     p_ver.set_defaults(func=cmd_verify)
+
+    p_upd = sub.add_parser("update", help="Check for and download the latest GhidraGuard CLI release")
+    p_upd.add_argument("--check", action="store_true", help="Check only without downloading")
+    p_upd.add_argument("--json", action="store_true", help="Output JSON")
+    p_upd.set_defaults(func=cmd_update)
+
+    p_ai = sub.add_parser("ai-scan", help="Classify a binary using custom trained GhidraGuard-SecNet-v1 AI")
+    p_ai.add_argument("target", help="Target .exe/.dll/.apk file")
+    p_ai.add_argument("--json", action="store_true", help="Output JSON")
+    p_ai.set_defaults(func=cmd_ai_scan)
 
     args = parser.parse_args()
     return args.func(args)

@@ -1,10 +1,11 @@
-# GhidraGuard (`v1.0.0`)
+# GhidraGuard (`v1.1.0`)
 
-**GhidraGuard** is a **100% free, local, offline** security scanner, reverse-engineering assistant, and surgical binary sanitizer for **Windows (`.exe` / `.dll`)** and **Android (`.apk` / `.so`)**.
+**GhidraGuard** is a **100% free, local, offline** security scanner, reverse-engineering assistant, and surgical binary sanitizer for **Windows, Linux, macOS, Google Colab, and Android** (`.exe`, `.dll`, `.apk`, `.so`).
 
-- **Zero Cloud / Zero Ollama / Zero External Server:** Runs 100% offline with direct in-process PyTorch CUDA + Flash Attention on Windows and on-device MediaPipe LLM inference (zero `INTERNET` permission) on Android.
-- **Integrity-Preserving Sanitization:** Detects and strips unauthorized code injections, RWX sections, hijacked entry points (OEP), unauthorized TLS callbacks, code-cave shellcode, malicious overlays, malicious DLL exports, injected secondary DEX payloads, unauthorized `.so` libraries, and hidden `assets/` droppers — while reconstructing headers, checksums, and manifests so legitimate apps continue running normally.
-- **Prebuilt Releases:** Download `GhidraGuard-GUI.exe`, `GhidraGuard-CLI.exe`, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/GhidraGuard/releases/latest).
+- **Custom Trained AI Model (`GhidraGuard-SecNet-v1`):** Custom 13.9M-parameter 6-layer Transformer trained specifically for GhidraGuard on NVIDIA RTX 5060 Ti (`100%` validation accuracy across 12 threat categories & 8 surgical patch strategies). Only **26.5 MB** FP16 safetensors — **auto-downloads on first use** from GitHub Releases' Fastly Global CDN and runs on CUDA, Apple MPS, Google Colab GPUs, or CPU.
+- **Built-In Auto-Updater:** Automatically checks for updates on Windows/Linux/macOS GUI, Android, and Google Colab. The CLI never auto-updates silently and uses an explicit `update` command instead.
+- **Prebuilt Releases:** Download `GhidraGuard-GUI.exe`, `GhidraGuard-CLI.exe`, Linux/macOS binaries, custom AI model weights, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/GhidraGuard/releases/latest).
+- **Google Colab:** Open [`GhidraGuard_Colab.ipynb`](https://colab.research.google.com/github/FlaxyDitto-dev/GhidraGuard/blob/main/GhidraGuard_Colab.ipynb) directly in Colab with free GPU acceleration.
 
 ---
 
@@ -39,6 +40,13 @@ Works on Windows PE binaries (`.exe`, `.dll`, `.sys`, `.scr`, `.asi`, `.ocx`), A
 # Verify structural integrity (PE headers/sections/CheckSum or APK ZIP/AXML/DEX/ELF)
 .\GhidraGuard-CLI.exe verify "C:\path\to\cleaned.exe"
 .\GhidraGuard-CLI.exe verify "C:\path\to\cleaned.apk"
+
+# Run custom trained GhidraGuard-SecNet-v1 AI model (auto-downloads ~26.5 MB on first run)
+.\GhidraGuard-CLI.exe ai-scan "C:\path\to\app.exe"
+
+# Explicit CLI update command (CLI never auto-updates on normal commands)
+.\GhidraGuard-CLI.exe update --check
+.\GhidraGuard-CLI.exe update
 ```
 
 *(If running from Python source instead of the compiled `.exe`, replace `.\GhidraGuard-CLI.exe` with `python cli.py`.)*
@@ -94,6 +102,28 @@ pip install --index-url https://download.pytorch.org/whl/cu128 torch
 pip install -r requirements-cuda.txt
 python main.py
 ```
+
+---
+
+## How to Build for Linux & macOS
+
+### Linux (`build_linux.sh`)
+```bash
+sudo apt-get install -y python3-tk   # required for CustomTkinter GUI
+chmod +x build_linux.sh
+./build_linux.sh
+```
+Outputs `dist/GhidraGuard-GUI-Linux` and `dist/GhidraGuard-CLI-Linux`.
+
+### macOS (`build_macos.sh`)
+```bash
+chmod +x build_macos.sh
+./build_macos.sh
+```
+Outputs `dist/GhidraGuard-GUI-macOS.app` and `dist/GhidraGuard-CLI-macOS`.
+
+### Google Colab
+Open `GhidraGuard_Colab.ipynb` in Google Colab — Cell 1 automatically updates GhidraGuard and downloads `GhidraGuard-SecNet-v1` onto the Colab GPU, and Cell 2 lets you upload, scan, AI-audit, sanitize, and download cleaned `.exe`/`.dll`/`.apk` files.
 
 ---
 

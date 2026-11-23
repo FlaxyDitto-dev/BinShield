@@ -14,7 +14,10 @@ import os
 import re
 import shlex
 import subprocess
-import winreg
+try:
+    import winreg  # type: ignore
+except ImportError:
+    winreg = None  # Linux / macOS / Google Colab
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -159,14 +162,18 @@ SUSPICIOUS_PATH_FRAGMENTS: Tuple[str, ...] = (
     "\\downloads\\",
 )
 
-RUN_REGISTRY_KEYS: List[Tuple[int, str, str]] = [
-    (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", "HKCU\\Run"),
-    (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "HKCU\\RunOnce"),
-    (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run", "HKLM\\Run"),
-    (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "HKLM\\RunOnce"),
-    (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", "HKLM\\WOW6432\\Run"),
-    (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce", "HKLM\\WOW6432\\RunOnce"),
-]
+RUN_REGISTRY_KEYS: List[Tuple[int, str, str]] = (
+    [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", "HKCU\\Run"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "HKCU\\RunOnce"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run", "HKLM\\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "HKLM\\RunOnce"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", "HKLM\\WOW6432\\Run"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce", "HKLM\\WOW6432\\RunOnce"),
+    ]
+    if winreg is not None
+    else []
+)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +272,8 @@ def is_pe_signed(file_path: str, pe_obj: Optional[pefile.PE] = None) -> bool:
 
 def _win_verify_trust(file_path: str) -> bool:
     """Invoke Windows WinVerifyTrust API to verify embedded Authenticode signature."""
+    if os.name != "nt" or not hasattr(ctypes, "windll"):
+        return False
     class GUID(ctypes.Structure):
         _fields_ = [
             ("Data1", ctypes.c_ulong),
@@ -1093,8 +1102,8 @@ class SystemScanner:
             except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                 continue
 
-        # --- Stage 2: Startup Registry Keys ---
-        if not self._cancel:
+        # --- Stage 2: Startup Registry Keys (Windows only) ---
+        if not self._cancel and winreg is not None:
             if progress_callback:
                 progress_callback(0.65, "Scanning Windows startup registry keys...")
             self._log("[SCAN] Stage 2/3: Scanning HKCU/HKLM Run persistence keys...")
@@ -1120,8 +1129,8 @@ class SystemScanner:
                 except OSError:
                     continue
 
-        # --- Stage 3: Scheduled Tasks ---
-        if not self._cancel:
+        # --- Stage 3: Scheduled Tasks (Windows only) ---
+        if not self._cancel and os.name == "nt":
             if progress_callback:
                 progress_callback(0.82, "Scanning Windows Scheduled Tasks...")
             self._log("[SCAN] Stage 3/3: Scanning Windows Scheduled Tasks...")

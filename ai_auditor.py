@@ -22,14 +22,15 @@ from cuda_engine import (
     CUDAFlashAttentionEngine,
     DEFAULT_LOCAL_MODEL,
 )
+from custom_model import GhidraGuardSecNetClient, MODEL_NAME as CUSTOM_SECNET_MODEL
 from ghidra_engine import GhidraAnalysisResult, GhidraEngine
 
 
 # ---------------------------------------------------------------------------
-# Default Compact Local Coding Model (Direct In-Process CUDA + Flash Attention)
+# Default Custom Trained Local Model (GhidraGuard-SecNet-v1, Auto-Downloaded)
 # ---------------------------------------------------------------------------
 
-DEFAULT_AUTO_MODEL = DEFAULT_LOCAL_MODEL  # Qwen/Qwen2.5-Coder-3B-Instruct
+DEFAULT_AUTO_MODEL = CUSTOM_SECNET_MODEL  # GhidraGuard-SecNet-v1 (custom trained on RTX 5060 Ti)
 
 # Functions that must NEVER be patched (entrypoints, CRT/libs, stdio/prints, GUI frameworks)
 PROTECTED_EXACT_NAMES = {
@@ -239,34 +240,47 @@ class DirectLocalAIClient:
 
     def __init__(
         self,
-        model: str = DEFAULT_LOCAL_MODEL,
+        model: str = DEFAULT_AUTO_MODEL,
         use_cuda: bool = True,
         flash_attention: bool = True,
         num_ctx: int = 32768,
         precision: str = "bf16",
         log_callback: Optional[Callable[[str], None]] = None,
     ):
-        self.model = (model or "").strip() or DEFAULT_LOCAL_MODEL
+        self.model = (model or "").strip() or DEFAULT_AUTO_MODEL
         self.use_cuda = use_cuda
         self.flash_attention = flash_attention
         self.num_ctx = max(4096, int(num_ctx or 32768))
         self.precision = precision
         self._log = log_callback or (lambda msg: None)
         self._engine: Optional[CUDAFlashAttentionEngine] = None
+        self._secnet: Optional[GhidraGuardSecNetClient] = None
+
+    def _is_custom_secnet(self) -> bool:
+        return self.model.strip().lower() in (CUSTOM_SECNET_MODEL.lower(), "secnet", "ghidraguard-secnet")
 
     def list_models(self) -> List[str]:
-        """List locally cached HuggingFace models and recommended compact coding models."""
-        return CUDAFlashAttentionEngine.list_local_models()
+        """List custom GhidraGuard-SecNet-v1 first, plus locally cached HuggingFace models."""
+        models = [CUSTOM_SECNET_MODEL]
+        for m in CUDAFlashAttentionEngine.list_local_models():
+            if m not in models:
+                models.append(m)
+        return models
 
     def ensure_model_ready(
         self,
-        default_model: str = DEFAULT_LOCAL_MODEL,
+        default_model: str = DEFAULT_AUTO_MODEL,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """Load the configured local AI model directly into CUDA VRAM (or CPU)."""
+        """Load the configured local AI model directly into CUDA VRAM (or MPS/CPU)."""
         log = log_callback or self._log
         if not self.model:
             self.model = default_model
+        if self._is_custom_secnet():
+            if self._secnet is None:
+                self._secnet = GhidraGuardSecNetClient(use_cuda=self.use_cuda, log_callback=log)
+            self._secnet.ensure_loaded()
+            return CUSTOM_SECNET_MODEL
         if self._engine is None or self._engine.model_id != self.model:
             self._engine = CUDAFlashAttentionEngine(
                 model_id=self.model,
@@ -279,11 +293,40 @@ class DirectLocalAIClient:
         return self.model
 
     def unload(self) -> None:
+        if self._secnet is not None:
+            self._secnet.unload()
         if self._engine is not None:
             self._engine.unload()
 
     def query_json(self, system_prompt: str, user_prompt: str) -> str:
-        """Run direct in-process inference (CUDA + Flash Attention) and return raw text."""
+        """Run direct in-process inference (GhidraGuard-SecNet-v1 or HF CUDA LLM) and return JSON."""
+        if self._is_custom_secnet():
+            if self._secnet is None or not self._secnet.is_loaded:
+                self.ensure_model_ready()
+            assert self._secnet is not None
+            # Parse structured function blocks from Ghidra user_prompt if present
+            funcs: List[Dict[str, Any]] = []
+            blocks = re.split(r"===\s*FUNCTION:\s*", user_prompt)
+            for blk in blocks[1:]:
+                header_line = blk.splitlines()[0] if blk.splitlines() else ""
+                fname = header_line.split("|")[0].strip().rstrip("=").strip()
+                va_m = re.search(r"VA=(0x[0-9a-fA-F]+)", header_line)
+                off_m = re.search(r"FILE_OFFSET=(0x[0-9a-fA-F]+)", header_line)
+                funcs.append({
+                    "name": fname,
+                    "va": va_m.group(1) if va_m else "0x0",
+                    "file_offset": off_m.group(1) if off_m else "0x0",
+                    "pseudo_c": blk[:2000],
+                })
+            if funcs:
+                return self._secnet.audit_functions_json(funcs)
+            pred = self._secnet.predict(user_prompt[:2000])
+            return json.dumps({
+                "is_clean": not pred["is_malicious"],
+                "unpatchable_or_packed": False,
+                "threat_summary": f"{CUSTOM_SECNET_MODEL}: {pred['category']} ({pred['malicious_probability']*100:.1f}%)",
+                "malicious_functions": [],
+            })
         if self._engine is None or not self._engine.is_loaded:
             self.ensure_model_ready()
         assert self._engine is not None
