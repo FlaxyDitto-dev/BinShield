@@ -1,8 +1,8 @@
-# GhidraGuard (`v0.3.0-beta.1` — Structural PE/APK Sanitizer, Headless CLI & 210-Sample QA Suite)
+# GhidraGuard (`v1.0.0` — Stable Release)
 
 > **Built on November 21–23, 2026 using Gemini 4 Neon.**
 >
-> **Status:** Beta (`v0.3.0-beta.1`). Intended for local reverse engineering research, malware triage, and defensive binary-patching experiments. Always test on isolated copies and review diffs before deploying patched binaries.
+> **Status:** Stable Release (`v1.0.0`). 100% free, local, offline security, reverse-engineering, and surgical binary-sanitization suite for Windows (`.exe` / `.dll`) and Android (`.apk` / `.so`). Always keep backups before deploying patched binaries.
 
 **GhidraGuard** is a **100% free, local, offline** security, reverse-engineering, and AI-assisted binary-patching suite — available for **Windows Desktop** (Python `CustomTkinter` + Ghidra Headless + CUDA & Flash Attention) and **Android** (native Kotlin + Jetpack Compose in [`android/`](android/)).
 
@@ -131,8 +131,10 @@ cd android
 ```
 Outputs `android\app\build\outputs\apk\debug\app-debug.apk` (bundles the native MediaPipe on-device LLM runtime with zero `INTERNET` permission).
 
-### Compile Standalone Elevated `.exe`
+### Compile Standalone GUI & CLI `.exe` Binaries
 ```bat
 build.bat
 ```
-Compiles `dist\GhidraGuard.exe` via `PyInstaller --noconsole --onefile --uac-admin --name "GhidraGuard" --collect-all customtkinter --clean main.py`.
+Compiles both standalone Windows executables:
+- `dist\GhidraGuard-GUI.exe` (dark-mode CustomTkinter desktop app with UAC elevation manifest)
+- `dist\GhidraGuard-CLI.exe` (headless CLI: `scan`, `sanitize`, `verify`, `--json`)

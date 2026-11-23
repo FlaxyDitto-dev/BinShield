@@ -1,6 +1,6 @@
 {
   "total_samples": 210,
-  "elapsed_seconds": 25.07,
+  "elapsed_seconds": 26.01,
   "detection": {
     "tp": 120,
     "tn": 90,

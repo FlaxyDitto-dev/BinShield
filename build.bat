@@ -33,12 +33,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [*] Compiling GhidraGuard.exe with UAC Administrator manifest...
+echo [*] Compiling GhidraGuard-GUI.exe with UAC Administrator manifest...
 ".venv\Scripts\pyinstaller.exe" ^
     --noconsole ^
     --onefile ^
     --uac-admin ^
-    --name "GhidraGuard" ^
+    --name "GhidraGuard-GUI" ^
     --collect-all customtkinter ^
     --exclude-module torch ^
     --exclude-module transformers ^
@@ -51,12 +51,35 @@ echo [*] Compiling GhidraGuard.exe with UAC Administrator manifest...
     main.py
 
 if errorlevel 1 (
-    echo [!] PyInstaller build failed.
+    echo [!] PyInstaller GUI build failed.
+    exit /b 1
+)
+
+echo [*] Compiling GhidraGuard-CLI.exe (headless CLI)...
+".venv\Scripts\pyinstaller.exe" ^
+    --console ^
+    --onefile ^
+    --name "GhidraGuard-CLI" ^
+    --exclude-module customtkinter ^
+    --exclude-module tkinter ^
+    --exclude-module torch ^
+    --exclude-module transformers ^
+    --exclude-module accelerate ^
+    --exclude-module sympy ^
+    --exclude-module numpy ^
+    --exclude-module safetensors ^
+    --exclude-module tokenizers ^
+    --clean ^
+    cli.py
+
+if errorlevel 1 (
+    echo [!] PyInstaller CLI build failed.
     exit /b 1
 )
 
 echo.
-echo [+] Build succeeded! Standalone executable created at:
-echo     %cd%\dist\GhidraGuard.exe
+echo [+] Build succeeded! Standalone executables created at:
+echo     %cd%\dist\GhidraGuard-GUI.exe
+echo     %cd%\dist\GhidraGuard-CLI.exe
 echo.
 endlocal

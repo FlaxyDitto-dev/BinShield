@@ -481,8 +481,9 @@ def _inspect_pe_anomalies(
         sample_len = min(raw_size, 512 * 1024)
         data = sec.get_data(length=sample_len) if sample_len > 0 else b""
         ent = _shannon_entropy(data[: 256 * 1024]) if data else 0.0
-        # Exclude .rsrc (icons/PNGs/compressed assets) from packer entropy tracking
-        if sec_low != ".rsrc" and ent > max_entropy:
+        # Only track packer entropy on executable sections (non-executable .rsrc/.rdata/.data
+        # legitimately hold compressed shaders, icons, PNGs, and game assets)
+        if bool(sec.Characteristics & IMAGE_SCN_MEM_EXECUTE) and ent > max_entropy:
             max_entropy = ent
 
         chars = int(sec.Characteristics or 0)
@@ -842,9 +843,12 @@ def analyze_pe_file(
 
         # Inspect imports
         benign_overlap_only = False
+        imported_dlls: Set[str] = set()
         if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
             found_apis: Set[str] = set()
             for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                if entry.dll:
+                    imported_dlls.add(entry.dll.decode("utf-8", errors="ignore").lower())
                 for imp in entry.imports:
                     if imp.name:
                         api_name = imp.name.decode("utf-8", errors="ignore")
@@ -910,6 +914,47 @@ def analyze_pe_file(
                 })
             elif not signed:
                 indicators.append(f"Unsigned proxy DLL '{name}' (verify if legitimate mod/loader)")
+
+        # Legitimate Desktop GUI / Game / Emulator App Calibration:
+        # Large multimedia/GUI/emulator binaries (SDL2, wxWidgets, Qt, ImGui, ReShade/DXGI)
+        # legitimately import keyboard/window hooks (SetWindowsHookExW), thread-context (JIT),
+        # and updater HTTP APIs. If a binary has ZERO structural anomalies, ZERO packer section
+        # names, is NOT masquerading, is NOT in a temp/AppData folder, and has NO hard-malware
+        # process-injection / dropper chain (VirtualAllocEx+WriteProcessMemory, CreateRemoteThread,
+        # NtUnmapViewOfSection, URLDownloadToFile), cap its static heuristic score below threshold.
+        gui_media_dlls = {
+            "opengl32.dll", "d3d11.dll", "d3d12.dll", "d3d9.dll", "dxgi.dll", "vulkan-1.dll",
+            "sdl2.dll", "qt6core.dll", "qt5core.dll", "qt6gui.dll", "qt5gui.dll",
+            "winmm.dll", "xinput1_3.dll", "xinput1_4.dll", "dinput8.dll", "dwmapi.dll",
+            "gdi32.dll", "comctl32.dll", "comdlg32.dll", "ole32.dll", "uxtheme.dll",
+            "user32.dll",
+        }
+        imp_lower = {a.lower() for a in suspicious_imports}
+        has_hard_injection_chain = (
+            {"virtualallocex", "writeprocessmemory"}.issubset(imp_lower)
+            or "createremotethread" in imp_lower
+            or "createremotethreadex" in imp_lower
+            or "ntunmapviewofsection" in imp_lower
+            or "urldownloadtofilea" in imp_lower
+            or "urldownloadtofilew" in imp_lower
+        )
+        has_packer_section = "Packed / Obfuscated" in categories
+        structural_anomalies = [a for a in anomalies if a.get("type") != "PROXY_SIDELOAD"]
+        is_masquerading = name.lower() in SYSTEM_BINARY_NAMES and not _is_in_legit_windows_dir(file_path)
+        has_rich_gui_media = len(imported_dlls & gui_media_dlls) >= 2 or (
+            file_size >= 2 * 1024 * 1024 and bool(imported_dlls & gui_media_dlls)
+        )
+        if (
+            has_rich_gui_media
+            and not structural_anomalies
+            and not has_packer_section
+            and not is_masquerading
+            and not in_suspicious_dir
+            and not has_hard_injection_chain
+        ):
+            score = min(score, 18)
+            anomalies = [a for a in anomalies if a.get("type") != "PROXY_SIDELOAD"]
+            indicators.append("Calibrated: clean desktop/game/emulator profile (0 structural anomalies)")
 
         pe.close()
     except pefile.PEFormatError:
