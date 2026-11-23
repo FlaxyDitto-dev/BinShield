@@ -257,7 +257,17 @@ class DirectLocalAIClient:
         self._secnet: Optional[GhidraGuardSecNetClient] = None
 
     def _is_custom_secnet(self) -> bool:
-        return self.model.strip().lower() in (CUSTOM_SECNET_MODEL.lower(), "secnet", "ghidraguard-secnet")
+        low = self.model.strip().lower()
+        if low in (CUSTOM_SECNET_MODEL.lower(), "ghidraguard-secnet-v1", "ghidraguard-secnet-v2", "secnet", "ghidraguard-secnet"):
+            return True
+        # Inside standalone frozen .exe / MSI installs (no torch/transformers), automatically
+        # route to the preinstalled GhidraGuard-SecNet-v2 ONNX model instead of failing!
+        try:
+            import torch  # noqa: F401
+            import transformers  # noqa: F401
+            return False
+        except ImportError:
+            return True
 
     def list_models(self) -> List[str]:
         """List custom GhidraGuard-SecNet-v1 first, plus locally cached HuggingFace models."""

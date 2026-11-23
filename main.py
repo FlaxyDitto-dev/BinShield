@@ -9,6 +9,7 @@ import ctypes
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -122,6 +123,13 @@ class SettingsStore:
                     self.data.update(loaded)
             except Exception:
                 pass
+        # Auto-migrate old HuggingFace models to preinstalled GhidraGuard-SecNet-v2
+        # when running in standalone frozen .exe / MSI (where torch/transformers aren't bundled)
+        if getattr(sys, "frozen", False):
+            cur = str(self.data.get("llm_model") or "").strip()
+            if cur.lower() != DEFAULT_AUTO_MODEL.lower():
+                self.data["llm_model"] = DEFAULT_AUTO_MODEL
+                self.save()
 
     def save(self) -> None:
         try:
@@ -141,7 +149,7 @@ class GhidraGuardApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.title("GhidraGuard v0.2.0-beta.1 — CUDA + Flash Attention Local RE & AI Binary Patcher")
+        self.title(f"GhidraGuard v{APP_VERSION} — Offline RE & Custom AI Binary Patcher")
         self.geometry("1360x860")
         self.minsize(1120, 720)
         self.configure(fg_color=BG_ROOT)
@@ -180,7 +188,7 @@ class GhidraGuardApp(ctk.CTk):
 
         self._build_layout()
         self._show_view("scanner")
-        self.log("[SYSTEM] GhidraGuard v0.2.0 initialized (100% Local / Offline Mode).")
+        self.log(f"[SYSTEM] GhidraGuard v{APP_VERSION} initialized (100% Local / Offline Mode).")
         if self.gpu_info.cuda_available:
             self.log(
                 f"[CUDA] Detected {self.gpu_info.gpu_name} ({self.gpu_info.vram_total_gb} GB VRAM, "

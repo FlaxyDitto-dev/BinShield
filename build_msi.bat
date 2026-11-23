@@ -12,10 +12,10 @@ if not exist "dist\GhidraGuard-CLI.exe" (
     echo [!] dist\GhidraGuard-CLI.exe not found. Run build.bat first.
     exit /b 1
 )
-wix build installer\GhidraGuard.wxs -arch x64 -o dist\GhidraGuard-v2.1.0-Setup-x64.msi
+wix build installer\GhidraGuard.wxs -arch x64 -o dist\GhidraGuard-v2.1.1-Setup-x64.msi
 if errorlevel 1 (
     echo [!] WiX MSI build failed.
     exit /b 1
 )
-echo [+] Created Windows Installer: dist\GhidraGuard-v2.1.0-Setup-x64.msi
+echo [+] Created Windows Installer: dist\GhidraGuard-v2.1.1-Setup-x64.msi
 endlocal

@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="GhidraGuard"
            Manufacturer="FlaxyDitto-Dev"
-           Version="2.1.0.0"
+           Version="2.1.1.0"
            UpgradeCode="E4B9A2F1-7C38-4D15-9A6B-2F1E8D0C4B72"
            Scope="perMachine">
 
