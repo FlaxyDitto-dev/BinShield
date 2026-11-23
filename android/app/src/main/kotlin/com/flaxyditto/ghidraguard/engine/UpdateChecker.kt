@@ -17,7 +17,7 @@ data class AndroidUpdateInfo(
  * Automatic GitHub Releases update checker for GhidraGuard Android Edition.
  */
 object UpdateChecker {
-    const val CURRENT_VERSION = "1.1.0"
+    const val CURRENT_VERSION = "1.1.1"
     private const val API_URL = "https://api.github.com/repos/FlaxyDitto-dev/GhidraGuard/releases/latest"
 
     fun checkLatestRelease(): AndroidUpdateInfo {

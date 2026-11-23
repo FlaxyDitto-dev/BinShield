@@ -213,13 +213,13 @@ def cmd_ai_scan(args: argparse.Namespace) -> int:
         f"indicators={'; '.join(static_res.get('indicators', [])[:6])}"
     )
 
-    client = GhidraGuardSecNetClient(log_callback=(None if args.json else print))
+    client = GhidraGuardSecNetClient(device=args.device, log_callback=(None if args.json else print))
     ai_pred = client.predict(summary_text)
     payload = {"file": str(target), "static_score": static_res.get("risk_score", 0), "ai": ai_pred}
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
-        print(f"[AI] Model    : {ai_pred['model']}")
+        print(f"[AI] Model    : {ai_pred['model']} ({ai_pred['device']})")
         print(f"[AI] Verdict  : {'MALICIOUS' if ai_pred['is_malicious'] else 'CLEAN'} (prob={ai_pred['malicious_probability']*100:.1f}%)")
         print(f"[AI] Category : {ai_pred['category']} ({ai_pred['category_confidence']*100:.1f}%)")
         print(f"[AI] Strategy : {ai_pred['patch_strategy']} ({ai_pred['strategy_confidence']*100:.1f}%)")
@@ -257,6 +257,7 @@ def main() -> int:
 
     p_ai = sub.add_parser("ai-scan", help="Classify a binary using custom trained GhidraGuard-SecNet-v1 AI")
     p_ai.add_argument("target", help="Target .exe/.dll/.apk file")
+    p_ai.add_argument("--device", default="auto", choices=["auto", "gpu", "npu", "cpu", "onnx", "torch"], help="Accelerator backend")
     p_ai.add_argument("--json", action="store_true", help="Output JSON")
     p_ai.set_defaults(func=cmd_ai_scan)
 

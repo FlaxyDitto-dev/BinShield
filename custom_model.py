@@ -1,18 +1,17 @@
 """
 GhidraGuard - Custom Trained AI Model (GhidraGuard-SecNet-v1)
-14M-parameter 6-layer Multi-Head Self-Attention Transformer trained specifically for
-GhidraGuard malware detection, Ghidra pseudo-C function auditing, threat classification,
-and surgical patch strategy recommendation across Windows PE (.exe/.dll) and Android (.apk/.so).
+Universal Multi-Accelerator Runtime: GPU (NVIDIA CUDA, AMD ROCm, Intel XPU/Arc, Apple MPS, DirectML),
+NPU (Intel OpenVINO NPU, Qualcomm QNN Snapdragon NPU, Apple CoreML Neural Engine, Android NNAPI),
+and Universal CPU (ONNX Runtime or PyTorch).
 
 Features:
 - Fast auto-download from GitHub Releases (Fastly Global CDN) on first use
-- Runs on NVIDIA CUDA, Apple Silicon MPS, Google Colab GPUs, or CPU
-- Zero Ollama, zero external server, ~28 MB FP16 safetensors footprint
+- Supports both ONNX Runtime (.onnx — runs on NPU/GPU/CPU with zero PyTorch dependency!)
+  and PyTorch (.safetensors — runs on CUDA/ROCm/XPU/MPS/CPU)
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -23,13 +22,43 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 MODEL_NAME = "GhidraGuard-SecNet-v1"
-MODEL_RELEASE_TAG = "v1.1.0"
+MODEL_RELEASE_TAG = "v1.1.1"
 MODEL_REPO = "FlaxyDitto-dev/GhidraGuard"
 MODEL_WEIGHTS_FILENAME = "GhidraGuard-SecNet-v1.safetensors"
+MODEL_ONNX_FILENAME = "GhidraGuard-SecNet-v1.onnx"
 MODEL_VOCAB_FILENAME = "GhidraGuard-SecNet-v1-vocab.json"
 
 MODEL_WEIGHTS_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_WEIGHTS_FILENAME}"
+MODEL_ONNX_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_ONNX_FILENAME}"
 MODEL_VOCAB_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_VOCAB_FILENAME}"
+
+# Priority lists for ONNX Runtime Execution Providers (GPU / NPU / CPU)
+ORT_GPU_PROVIDERS = [
+    "CUDAExecutionProvider",
+    "ROCMExecutionProvider",
+    "DmlExecutionProvider",
+    "CoreMLExecutionProvider",
+    "OpenVINOExecutionProvider",
+]
+ORT_NPU_PROVIDERS = [
+    "QNNExecutionProvider",       # Qualcomm Snapdragon X / Hexagon NPU
+    "OpenVINOExecutionProvider",  # Intel Core Ultra NPU / iGPU
+    "CoreMLExecutionProvider",    # Apple Neural Engine (ANE) NPU
+    "NnapiExecutionProvider",     # Android NNAPI NPU
+    "VitisAIExecutionProvider",   # AMD Ryzen AI NPU
+    "DmlExecutionProvider",       # Windows DirectML (GPU / NPU)
+]
+ORT_AUTO_PROVIDERS = [
+    "CUDAExecutionProvider",
+    "ROCMExecutionProvider",
+    "QNNExecutionProvider",
+    "VitisAIExecutionProvider",
+    "OpenVINOExecutionProvider",
+    "CoreMLExecutionProvider",
+    "DmlExecutionProvider",
+    "NnapiExecutionProvider",
+    "CPUExecutionProvider",
+]
 
 THREAT_CATEGORIES: List[str] = [
     "Clean / Benign",
@@ -72,6 +101,59 @@ def get_default_model_dir() -> Path:
         p = Path.home() / ".ghidraguard" / "models" / MODEL_NAME
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def detect_available_accelerators() -> Dict[str, Any]:
+    """Detect all available hardware accelerators (GPU, NPU, CPU) across ONNX Runtime and PyTorch."""
+    info: Dict[str, Any] = {
+        "onnxruntime_available": False,
+        "onnxruntime_providers": [],
+        "pytorch_available": False,
+        "pytorch_devices": [],
+        "recommended": "cpu",
+    }
+    try:
+        import onnxruntime as ort  # type: ignore
+        provs = list(ort.get_available_providers())
+        info["onnxruntime_available"] = True
+        info["onnxruntime_providers"] = provs
+    except Exception:
+        pass
+
+    try:
+        import torch  # type: ignore
+        info["pytorch_available"] = True
+        devs: List[str] = []
+        if torch.cuda.is_available():
+            devs.append(f"cuda ({torch.cuda.get_device_name(0)})")
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            devs.append("xpu (Intel Arc/XPU)")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            devs.append("mps (Apple Silicon)")
+        try:
+            import torch_directml  # type: ignore
+            if torch_directml.is_available():
+                devs.append("directml (Windows GPU/NPU)")
+        except Exception:
+            pass
+        devs.append("cpu")
+        info["pytorch_devices"] = devs
+    except Exception:
+        pass
+
+    # Determine best accelerator label
+    provs = info["onnxruntime_providers"]
+    for p in ORT_AUTO_PROVIDERS:
+        if p in provs and p != "CPUExecutionProvider":
+            info["recommended"] = f"onnx:{p}"
+            return info
+    if any(d.startswith(("cuda", "xpu", "mps", "directml")) for d in info["pytorch_devices"]):
+        info["recommended"] = f"torch:{info['pytorch_devices'][0]}"
+    elif info["onnxruntime_available"]:
+        info["recommended"] = "onnx:CPUExecutionProvider"
+    elif info["pytorch_available"]:
+        info["recommended"] = "torch:cpu"
+    return info
 
 
 class SecNetTokenizer:
@@ -160,7 +242,7 @@ def _build_secnet_module(
                 batch_first=True,
                 norm_first=True,
             )
-            self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
+            self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers, enable_nested_tensor=False)
             self.final_norm = nn.LayerNorm(d_model)
             self.malicious_head = nn.Linear(d_model, 1)
             self.category_head = nn.Linear(d_model, num_categories)
@@ -189,17 +271,14 @@ def _download_file(
     log = log_callback or (lambda msg: None)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    req = urllib.request.Request(url, headers={"User-Agent": "GhidraGuard/1.1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "GhidraGuard/1.1.1"})
     log(f"[MODEL] Downloading {dest.name} from fast GitHub CDN...")
     with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as out:
-        total = int(resp.headers.get("Content-Length") or 0)
-        done = 0
         while True:
             chunk = resp.read(256 * 1024)
             if not chunk:
                 break
             out.write(chunk)
-            done += len(chunk)
     tmp.replace(dest)
     mb = dest.stat().st_size / (1024 * 1024)
     log(f"[MODEL] Downloaded {dest.name} ({mb:.2f} MB) successfully.")
@@ -207,104 +286,234 @@ def _download_file(
 
 def ensure_custom_model_files(
     model_dir: Optional[Path] = None,
+    prefer_onnx: bool = False,
     log_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Path, Path]:
     """
-    Locate local GhidraGuard-SecNet-v1 weights + vocab, or auto-download them from
-    GitHub Releases Fastly CDN if not already cached locally.
+    Locate local GhidraGuard-SecNet-v1 weights (.onnx or .safetensors) + vocab,
+    or auto-download them from GitHub Releases Fastly CDN if not cached locally.
     """
     log = log_callback or (lambda msg: None)
+    w_name = MODEL_ONNX_FILENAME if prefer_onnx else MODEL_WEIGHTS_FILENAME
+    w_url = MODEL_ONNX_URL if prefer_onnx else MODEL_WEIGHTS_URL
 
-    # Check repo-local models/ directory first (for dev/source runs)
     repo_models = Path(__file__).resolve().parent / "models" / MODEL_NAME
-    if (repo_models / MODEL_WEIGHTS_FILENAME).is_file() and (repo_models / MODEL_VOCAB_FILENAME).is_file():
-        return repo_models / MODEL_WEIGHTS_FILENAME, repo_models / MODEL_VOCAB_FILENAME
+    if (repo_models / w_name).is_file() and (repo_models / MODEL_VOCAB_FILENAME).is_file():
+        return repo_models / w_name, repo_models / MODEL_VOCAB_FILENAME
 
     cache_dir = model_dir or get_default_model_dir()
-    weights_path = cache_dir / MODEL_WEIGHTS_FILENAME
+    weights_path = cache_dir / w_name
     vocab_path = cache_dir / MODEL_VOCAB_FILENAME
 
     if not vocab_path.is_file():
         _download_file(MODEL_VOCAB_URL, vocab_path, log_callback=log)
     if not weights_path.is_file():
-        _download_file(MODEL_WEIGHTS_URL, weights_path, log_callback=log)
+        _download_file(w_url, weights_path, log_callback=log)
 
     return weights_path, vocab_path
 
 
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-max(-50.0, min(50.0, x))))
+
+
+def _softmax(vals: List[float]) -> List[float]:
+    m = max(vals)
+    exps = [math.exp(v - m) for v in vals]
+    s = sum(exps) or 1.0
+    return [e / s for e in exps]
+
+
 class GhidraGuardSecNetClient:
     """
-    In-process inference client for GhidraGuard-SecNet-v1.
-    Auto-downloads weights on first run and runs on CUDA, Apple MPS, or CPU.
+    Universal multi-accelerator inference client for GhidraGuard-SecNet-v1.
+    Supports:
+      - device="auto" : best available (NVIDIA CUDA / AMD ROCm / Intel XPU / NPU / DirectML / CoreML / MPS / CPU)
+      - device="gpu"  : CUDA / ROCm / DirectML / XPU / MPS
+      - device="npu"  : Qualcomm QNN / Intel OpenVINO NPU / Apple CoreML ANE / AMD VitisAI / Android NNAPI / DirectML
+      - device="cpu"  : ONNX Runtime CPU or PyTorch CPU
+      - device="onnx" : Force ONNX Runtime (best available provider)
+      - device="torch": Force PyTorch (best available device)
     """
 
     def __init__(
         self,
         model_dir: Optional[Path] = None,
         use_cuda: bool = True,
+        device: str = "auto",
         log_callback: Optional[Callable[[str], None]] = None,
     ):
         self.model_dir = model_dir
         self.use_cuda = use_cuda
+        self.requested_device = (device or "auto").strip().lower()
+        if not use_cuda and self.requested_device == "auto":
+            self.requested_device = "cpu"
         self._log = log_callback or (lambda msg: None)
+        self._backend: str = ""  # "onnx" or "torch"
         self._model: Any = None
+        self._ort_session: Any = None
         self._tokenizer: Optional[SecNetTokenizer] = None
-        self._device: str = "cpu"
+        self._active_device: str = "cpu"
 
     @property
     def is_loaded(self) -> bool:
-        return self._model is not None and self._tokenizer is not None
+        return self._tokenizer is not None and (self._model is not None or self._ort_session is not None)
 
-    def ensure_loaded(self) -> None:
-        if self.is_loaded:
-            return
+    @property
+    def active_device(self) -> str:
+        return self._active_device
+
+    def _try_load_onnx(self, target: str) -> bool:
+        try:
+            import onnxruntime as ort  # type: ignore
+        except ImportError:
+            return False
+
+        avail = set(ort.get_available_providers())
+        if target == "npu":
+            wanted = [p for p in ORT_NPU_PROVIDERS if p in avail]
+            if not wanted:
+                wanted = ["CPUExecutionProvider"] if "CPUExecutionProvider" in avail else list(avail)
+        elif target == "gpu":
+            wanted = [p for p in ORT_GPU_PROVIDERS if p in avail]
+            if not wanted:
+                return False
+        elif target == "cpu":
+            wanted = ["CPUExecutionProvider"] if "CPUExecutionProvider" in avail else list(avail)
+        else:
+            wanted = [p for p in ORT_AUTO_PROVIDERS if p in avail] or list(avail)
+
+        weights_path, vocab_path = ensure_custom_model_files(
+            self.model_dir, prefer_onnx=True, log_callback=self._log
+        )
+        self._tokenizer = SecNetTokenizer.load(vocab_path)
+        sess_opts = ort.SessionOptions()
+        sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self._ort_session = ort.InferenceSession(str(weights_path), sess_options=sess_opts, providers=wanted)
+        active = self._ort_session.get_providers()[0] if self._ort_session.get_providers() else "CPUExecutionProvider"
+        self._backend = "onnx"
+        self._active_device = f"onnx:{active}"
+        self._log(
+            f"[MODEL] Loaded {MODEL_NAME} via ONNX Runtime on {active} "
+            f"({weights_path.stat().st_size / (1024*1024):.1f} MB)."
+        )
+        return True
+
+    def _load_torch(self, target: str) -> None:
         import torch
         from safetensors.torch import load_file
 
-        weights_path, vocab_path = ensure_custom_model_files(self.model_dir, log_callback=self._log)
+        weights_path, vocab_path = ensure_custom_model_files(
+            self.model_dir, prefer_onnx=False, log_callback=self._log
+        )
         self._tokenizer = SecNetTokenizer.load(vocab_path)
 
-        if self.use_cuda and torch.cuda.is_available():
-            self._device = "cuda"
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            self._device = "mps"
-        else:
-            self._device = "cpu"
+        dev: Any = "cpu"
+        dev_label = "cpu"
+        if target in ("auto", "gpu", "torch"):
+            if torch.cuda.is_available():
+                dev = "cuda"
+                dev_label = f"cuda ({torch.cuda.get_device_name(0)})"
+            elif hasattr(torch, "xpu") and torch.xpu.is_available():
+                dev = "xpu"
+                dev_label = "xpu"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                dev = "mps"
+                dev_label = "mps"
+            else:
+                try:
+                    import torch_directml  # type: ignore
+                    if torch_directml.is_available():
+                        dev = torch_directml.device()
+                        dev_label = "directml"
+                except Exception:
+                    pass
 
         model = _build_secnet_module(vocab_size=max(8192, len(self._tokenizer.vocab)))
         state = load_file(str(weights_path))
         model.load_state_dict(state, strict=True)
-        model.to(self._device)
-        if self._device == "cuda":
+        model.to(dev)
+        if dev == "cuda":
             model.half()
         else:
             model.float()
         model.eval()
         self._model = model
-        self._log(f"[MODEL] Loaded {MODEL_NAME} on {self._device.upper()} ({weights_path.stat().st_size / (1024*1024):.1f} MB).")
+        self._backend = "torch"
+        self._active_device = f"torch:{dev_label}"
+        self._log(
+            f"[MODEL] Loaded {MODEL_NAME} via PyTorch on {dev_label.upper()} "
+            f"({weights_path.stat().st_size / (1024*1024):.1f} MB)."
+        )
+
+    def ensure_loaded(self) -> None:
+        if self.is_loaded:
+            return
+        req = self.requested_device
+        # NPU / ONNX / CPU prefer ONNX Runtime (supports NPU/DirectML/OpenVINO/QNN/CoreML/NNAPI & zero-PyTorch CPU)
+        if req in ("npu", "onnx"):
+            if self._try_load_onnx(req):
+                return
+        if req == "cpu":
+            if self._try_load_onnx("cpu"):
+                return
+            self._load_torch("cpu")
+            return
+        if req == "torch":
+            self._load_torch("torch")
+            return
+        # "auto" or "gpu": try PyTorch CUDA/XPU/MPS first if available, else ONNX Runtime (NPU/DirectML/CoreML/CPU)
+        try:
+            import torch
+            if torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()) or (hasattr(torch, "xpu") and torch.xpu.is_available()):
+                self._load_torch(req)
+                return
+        except Exception:
+            pass
+        if self._try_load_onnx(req):
+            return
+        self._load_torch(req)
 
     def unload(self) -> None:
         self._model = None
+        self._ort_session = None
         self._tokenizer = None
+        self._backend = ""
 
     def predict(self, text: str) -> Dict[str, Any]:
         """Classify a pseudo-C function or PE/APK feature summary and recommend patch strategy."""
         self.ensure_loaded()
-        assert self._model is not None and self._tokenizer is not None
-        import torch
+        assert self._tokenizer is not None
+        encoded = self._tokenizer.encode(text)
 
-        ids = torch.tensor([self._tokenizer.encode(text)], dtype=torch.long, device=self._device)
-        with torch.inference_mode():
-            mal_logit, cat_logits, strat_logits = self._model(ids)
-            mal_prob = float(torch.sigmoid(mal_logit).item())
-            cat_idx = int(torch.argmax(cat_logits, dim=-1).item())
-            strat_idx = int(torch.argmax(strat_logits, dim=-1).item())
-            cat_conf = float(torch.softmax(cat_logits.float(), dim=-1)[0, cat_idx].item())
-            strat_conf = float(torch.softmax(strat_logits.float(), dim=-1)[0, strat_idx].item())
+        if self._backend == "onnx" and self._ort_session is not None:
+            import numpy as np  # type: ignore
+            inp = np.array([encoded], dtype=np.int64)
+            ml_arr, cl_arr, sl_arr = self._ort_session.run(None, {"input_ids": inp})
+            mal_prob = _sigmoid(float(ml_arr[0]))
+            cat_probs = _softmax([float(v) for v in cl_arr[0]])
+            strat_probs = _softmax([float(v) for v in sl_arr[0]])
+            cat_idx = max(range(len(cat_probs)), key=lambda i: cat_probs[i])
+            strat_idx = max(range(len(strat_probs)), key=lambda i: strat_probs[i])
+            cat_conf = cat_probs[cat_idx]
+            strat_conf = strat_probs[strat_idx]
+        else:
+            import torch
+            assert self._model is not None
+            dev = next(self._model.parameters()).device
+            ids = torch.tensor([encoded], dtype=torch.long, device=dev)
+            with torch.inference_mode():
+                mal_logit, cat_logits, strat_logits = self._model(ids)
+                mal_prob = float(torch.sigmoid(mal_logit).item())
+                cat_idx = int(torch.argmax(cat_logits, dim=-1).item())
+                strat_idx = int(torch.argmax(strat_logits, dim=-1).item())
+                cat_conf = float(torch.softmax(cat_logits.float(), dim=-1)[0, cat_idx].item())
+                strat_conf = float(torch.softmax(strat_logits.float(), dim=-1)[0, strat_idx].item())
 
         is_mal = mal_prob >= 0.5
         return {
             "model": MODEL_NAME,
+            "device": self._active_device,
             "is_malicious": is_mal,
             "malicious_probability": round(mal_prob, 4),
             "ai_risk_score": int(round(mal_prob * 100)),
@@ -315,16 +524,12 @@ class GhidraGuardSecNetClient:
         }
 
     def audit_functions_json(self, functions: List[Dict[str, Any]]) -> str:
-        """
-        Audit a list of Ghidra-decompiled functions and return the exact strict JSON schema
-        expected by ai_auditor.py!
-        """
+        """Audit Ghidra-decompiled functions and return the strict JSON schema expected by ai_auditor.py."""
         malicious_funcs: List[Dict[str, Any]] = []
         for fn in functions:
             fname = str(fn.get("name") or fn.get("function_name") or "")
             pseudo = str(fn.get("pseudo_c") or "")
-            prompt_text = f"FUNC {fname}\n{pseudo}"
-            pred = self.predict(prompt_text)
+            pred = self.predict(f"FUNC {fname}\n{pseudo}")
             if pred["is_malicious"]:
                 strat = pred["patch_strategy"]
                 if strat not in ("RET_ZERO", "RET_EARLY", "RET_ONE", "NOP_SLED", "FLIP_JUMP"):
@@ -334,19 +539,18 @@ class GhidraGuardSecNetClient:
                     "va": str(fn.get("va", "0x0")),
                     "file_offset": str(fn.get("file_offset", "0x0")),
                     "category": pred["category"],
-                    "reason": f"{MODEL_NAME} detected {pred['category']} (confidence {pred['malicious_probability']*100:.1f}%).",
+                    "reason": f"{MODEL_NAME} ({self._active_device}) detected {pred['category']} ({pred['malicious_probability']*100:.1f}%).",
                     "patch_strategy": strat,
                     "length": 3,
                 })
 
-        result = {
+        return json.dumps({
             "is_clean": len(malicious_funcs) == 0,
             "unpatchable_or_packed": False,
             "threat_summary": (
-                f"{MODEL_NAME}: 0 active malicious functions detected."
+                f"{MODEL_NAME} ({self._active_device}): 0 active malicious functions detected."
                 if not malicious_funcs
-                else f"{MODEL_NAME}: identified {len(malicious_funcs)} malicious function(s)."
+                else f"{MODEL_NAME} ({self._active_device}): identified {len(malicious_funcs)} malicious function(s)."
             ),
             "malicious_functions": malicious_funcs,
-        }
-        return json.dumps(result, indent=2)
+        }, indent=2)
