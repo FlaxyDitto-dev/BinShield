@@ -22,12 +22,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-MODEL_NAME = "BinShield-SecNet-v2"
-MODEL_RELEASE_TAG = "v3.0.0"
+MODEL_NAME = "BinShield-SecNet-v3"
+MODEL_RELEASE_TAG = "v4.0.0"
 MODEL_REPO = "FlaxyDitto-dev/BinShield"
-MODEL_WEIGHTS_FILENAME = "BinShield-SecNet-v2.safetensors"
-MODEL_ONNX_FILENAME = "BinShield-SecNet-v2-int8.onnx"
-MODEL_VOCAB_FILENAME = "BinShield-SecNet-v2-vocab.json"
+MODEL_WEIGHTS_FILENAME = "BinShield-SecNet-v3.safetensors"
+MODEL_ONNX_FILENAME = "BinShield-SecNet-v3-int8.onnx"
+MODEL_VOCAB_FILENAME = "BinShield-SecNet-v3-vocab.json"
 
 MODEL_WEIGHTS_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_WEIGHTS_FILENAME}"
 MODEL_ONNX_URL = f"https://github.com/{MODEL_REPO}/releases/download/{MODEL_RELEASE_TAG}/{MODEL_ONNX_FILENAME}"
@@ -523,24 +523,41 @@ class BinShieldSecNetClient:
         assert self._tokenizer is not None
         encoded = self._tokenizer.encode(text)
 
+        behaviors_out: List[str] = []
+        patch_urgency = 0
         if self._backend == "onnx" and self._ort_session is not None:
             import numpy as np  # type: ignore
             inp = np.array([encoded], dtype=np.int64)
-            ml_arr, cl_arr, sl_arr = self._ort_session.run(None, {"input_ids": inp})
+            ort_outs = self._ort_session.run(None, {"input_ids": inp})
+            ml_arr, cl_arr, sl_arr = ort_outs[0], ort_outs[1], ort_outs[2]
             mal_prob = _sigmoid(float(ml_arr[0]))
             cat_probs = _softmax([float(v) for v in cl_arr[0]])
             strat_probs = _softmax([float(v) for v in sl_arr[0]])
-            cat_idx = max(range(len(cat_probs)), key=lambda i: cat_probs[i])
-            strat_idx = max(range(len(strat_probs)), key=lambda i: strat_probs[i])
+            cat_idx = max(range(1, len(cat_probs)), key=lambda i: cat_probs[i]) if mal_prob >= 0.5 else 0
+            strat_idx = max(range(1, len(strat_probs)), key=lambda i: strat_probs[i]) if mal_prob >= 0.5 else 0
             cat_conf = cat_probs[cat_idx]
             strat_conf = strat_probs[strat_idx]
+            if len(ort_outs) >= 4:
+                beh_labels = [
+                    "Keylogging / Input Capture", "Process Injection / Hollowing",
+                    "C2 / Network Exfiltration", "Persistence / Privilege Escalation",
+                    "Crypto / Ransomware", "Structural PE/ELF/Mach-O Anomaly",
+                    "Shellcode / PEB Walk", "Packed / Obfuscated",
+                ]
+                beh_scores = [(_sigmoid(float(v)), beh_labels[i]) for i, v in enumerate(ort_outs[3][0]) if i < len(beh_labels)]
+                behaviors_out = [lbl for p, lbl in beh_scores if p >= 0.35]
+                if not behaviors_out and mal_prob >= 0.5 and beh_scores:
+                    behaviors_out = [max(beh_scores, key=lambda x: x[0])[1]]
+            if len(ort_outs) >= 5:
+                patch_urgency = int(round(_sigmoid(float(ort_outs[4][0])) * 100))
         else:
             import torch
             assert self._model is not None
             dev = next(self._model.parameters()).device
             ids = torch.tensor([encoded], dtype=torch.long, device=dev)
             with torch.inference_mode():
-                mal_logit, cat_logits, strat_logits = self._model(ids)
+                outs = self._model(ids)
+                mal_logit, cat_logits, strat_logits = outs[0], outs[1], outs[2]
                 mal_prob = float(torch.sigmoid(mal_logit).item())
                 cat_idx = int(torch.argmax(cat_logits, dim=-1).item())
                 strat_idx = int(torch.argmax(strat_logits, dim=-1).item())
@@ -558,6 +575,8 @@ class BinShieldSecNetClient:
             "category_confidence": round(cat_conf, 4),
             "patch_strategy": PATCH_STRATEGIES[strat_idx] if is_mal else "NONE",
             "strategy_confidence": round(strat_conf, 4),
+            "behaviors": behaviors_out if is_mal else [],
+            "patch_urgency": patch_urgency if is_mal else 0,
         }
 
     def audit_functions_json(self, functions: List[Dict[str, Any]]) -> str:

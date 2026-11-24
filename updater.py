@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "4.0.0"
 GITHUB_REPO = "FlaxyDitto-dev/BinShield"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 

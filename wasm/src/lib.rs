@@ -1,5 +1,8 @@
-// BinShield Core — WebAssembly (wasm32-unknown-unknown) Binary Analyzer & Surgical Patcher
-// Zero external crate dependencies: compiles directly with `rustc --target wasm32-unknown-unknown --crate-type=cdylib -C opt-level=z`
+// BinShield Unified Core v4.0.0 — Compiles identically to:
+//   - WebAssembly: docs/wasm/binshield_core.wasm  (--target wasm32-unknown-unknown --crate-type=cdylib)
+//   - Windows DLL: native/binshield_core.dll      (--crate-type=cdylib)
+//   - Linux .so:   native/libbinshield_core.so    (--crate-type=cdylib)
+// Zero external crate dependencies for instant reproducible cross-platform builds.
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::slice;
@@ -155,35 +158,23 @@ fn shannon_entropy(data: &[u8]) -> f64 {
 }
 
 fn read_u16_le(d: &[u8], off: usize) -> Option<u16> {
-    if off + 2 <= d.len() {
-        Some(u16::from_le_bytes([d[off], d[off + 1]]))
-    } else {
-        None
-    }
+    if off + 2 <= d.len() { Some(u16::from_le_bytes([d[off], d[off + 1]])) } else { None }
 }
 
 fn read_u32_le(d: &[u8], off: usize) -> Option<u32> {
-    if off + 4 <= d.len() {
-        Some(u32::from_le_bytes([d[off], d[off + 1], d[off + 2], d[off + 3]]))
-    } else {
-        None
-    }
+    if off + 4 <= d.len() { Some(u32::from_le_bytes([d[off], d[off + 1], d[off + 2], d[off + 3]])) } else { None }
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
+    if needle.is_empty() || needle.len() > haystack.len() { return None; }
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 fn find_ascii_ci(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|w| w.iter().zip(needle.iter()).all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase()))
+    if needle.is_empty() || needle.len() > haystack.len() { return None; }
+    haystack.windows(needle.len()).position(|w| {
+        w.iter().zip(needle.iter()).all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+    })
 }
 
 fn json_escape(s: &str) -> String {
@@ -200,6 +191,42 @@ fn json_escape(s: &str) -> String {
         }
     }
     out
+}
+
+fn extract_iocs(data: &[u8]) -> Vec<String> {
+    let mut iocs: Vec<String> = Vec::new();
+    let mut cur = Vec::new();
+    let limit = data.len().min(4 * 1024 * 1024);
+    for &b in &data[..limit] {
+        if b >= 0x20 && b <= 0x7e {
+            cur.push(b);
+        } else {
+            if cur.len() >= 8 {
+                if let Ok(s) = std::str::from_utf8(&cur) {
+                    let low = s.to_ascii_lowercase();
+                    if low.contains("http://")
+                        || low.contains("https://")
+                        || low.contains("currentversion\\run")
+                        || low.contains("powershell")
+                        || low.contains("cmd.exe")
+                        || low.contains("/dev/tcp/")
+                        || low.contains("discord.com/api/webhooks")
+                        || low.contains("api.telegram.org")
+                    {
+                        let trimmed = s.trim().chars().take(120).collect::<String>();
+                        if !iocs.contains(&trimmed) {
+                            iocs.push(trimmed);
+                            if iocs.len() >= 24 {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            cur.clear();
+        }
+    }
+    iocs
 }
 
 struct SectionInfo {
@@ -219,6 +246,131 @@ struct YaraHit {
     description: &'static str,
 }
 
+struct CfgNode {
+    id: String,
+    label: String,
+    offset: usize,
+    size: usize,
+    risk: i32,
+    kind: &'static str,
+}
+
+struct CfgEdge {
+    from: String,
+    to: String,
+    kind: &'static str,
+}
+
+fn build_cfg_graph(
+    data: &[u8],
+    sections: &[SectionInfo],
+    yara_hits: &[YaraHit],
+    suspicious_apis: &[String],
+) -> (Vec<CfgNode>, Vec<CfgEdge>) {
+    let mut nodes: Vec<CfgNode> = Vec::new();
+    let mut edges: Vec<CfgEdge> = Vec::new();
+
+    nodes.push(CfgNode {
+        id: "entry".to_string(),
+        label: "EntryPoint".to_string(),
+        offset: sections.iter().find(|s| s.executable).map(|s| s.raw_offset as usize).unwrap_or(0),
+        size: 64,
+        risk: if yara_hits.is_empty() && suspicious_apis.is_empty() { 5 } else { 35 },
+        kind: "entry",
+    });
+
+    // Scan executable section (or first 64KB) for x86/x64 function prologues
+    let (scan_start, scan_end) = if let Some(exec_sec) = sections.iter().find(|s| s.executable && s.raw_size > 0) {
+        let s = exec_sec.raw_offset as usize;
+        let e = s.saturating_add(exec_sec.raw_size as usize).min(data.len()).min(s + 65536);
+        (s, e)
+    } else {
+        (0, data.len().min(16384))
+    };
+
+    let mut func_count = 0usize;
+    let mut i = scan_start;
+    while i + 4 < scan_end && func_count < 10 {
+        let is_prologue = (data[i] == 0x55 && data[i + 1] == 0x48 && data[i + 2] == 0x89 && data[i + 3] == 0xE5)
+            || (data[i] == 0x55 && data[i + 1] == 0x89 && data[i + 2] == 0xE5)
+            || (data[i] == 0x48 && data[i + 1] == 0x83 && data[i + 2] == 0xEC)
+            || (data[i] == 0x40 && data[i + 1] == 0x53 && data[i + 2] == 0x48);
+        if is_prologue {
+            func_count += 1;
+            let nid = format!("sub_{:X}", i);
+            let near_yara = yara_hits.iter().any(|h| h.offset.abs_diff(i) < 512);
+            nodes.push(CfgNode {
+                id: nid.clone(),
+                label: format!("sub_0x{:X}", i),
+                offset: i,
+                size: 128,
+                risk: if near_yara { 90 } else { 20 },
+                kind: if near_yara { "malicious" } else { "function" },
+            });
+            edges.push(CfgEdge {
+                from: if func_count == 1 { "entry".to_string() } else { format!("sub_{:X}", nodes[nodes.len() - 2].offset) },
+                to: nid,
+                kind: "call",
+            });
+            i += 32;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Add YARA hit nodes
+    for (idx, h) in yara_hits.iter().take(6).enumerate() {
+        let nid = format!("yara_{}", idx);
+        nodes.push(CfgNode {
+            id: nid.clone(),
+            label: format!("{} @ 0x{:X}", h.rule, h.offset),
+            offset: h.offset,
+            size: 16,
+            risk: if h.severity == "CRITICAL" { 98 } else { 82 },
+            kind: "malicious",
+        });
+        let parent = if nodes.len() > 2 && nodes[1].kind != "malicious" {
+            nodes[1].id.clone()
+        } else {
+            "entry".to_string()
+        };
+        edges.push(CfgEdge { from: parent, to: nid, kind: "threat" });
+    }
+
+    // Add RWX / suspicious section nodes
+    for (idx, sec) in sections.iter().enumerate() {
+        if sec.rwx || sec.entropy >= 7.25 {
+            let nid = format!("sec_{}", idx);
+            nodes.push(CfgNode {
+                id: nid.clone(),
+                label: format!("Section {} (ent {:.2})", sec.name, sec.entropy),
+                offset: sec.raw_offset as usize,
+                size: sec.raw_size as usize,
+                risk: if sec.rwx { 92 } else { 68 },
+                kind: "malicious",
+            });
+            edges.push(CfgEdge { from: "entry".to_string(), to: nid, kind: "jump" });
+        }
+    }
+
+    // Add top suspicious API sink nodes
+    for (idx, api) in suspicious_apis.iter().take(5).enumerate() {
+        let nid = format!("api_{}", idx);
+        nodes.push(CfgNode {
+            id: nid.clone(),
+            label: format!("IMP:{}", api),
+            offset: 0,
+            size: 0,
+            risk: 78,
+            kind: "api",
+        });
+        let src = nodes.iter().rev().find(|n| n.kind == "function" || n.kind == "entry").map(|n| n.id.clone()).unwrap_or_else(|| "entry".to_string());
+        edges.push(CfgEdge { from: src, to: nid, kind: "import" });
+    }
+
+    (nodes, edges)
+}
+
 #[no_mangle]
 pub extern "C" fn wasm_analyze_binary(
     ptr: *const u8,
@@ -226,11 +378,7 @@ pub extern "C" fn wasm_analyze_binary(
     name_ptr: *const u8,
     name_len: usize,
 ) -> usize {
-    let data = if ptr.is_null() || len == 0 {
-        &[]
-    } else {
-        unsafe { slice::from_raw_parts(ptr, len) }
-    };
+    let data = if ptr.is_null() || len == 0 { &[] } else { unsafe { slice::from_raw_parts(ptr, len) } };
     let filename = if name_ptr.is_null() || name_len == 0 {
         "sample.bin".to_string()
     } else {
@@ -240,6 +388,7 @@ pub extern "C" fn wasm_analyze_binary(
 
     let sha256 = sha256_hex(data);
     let overall_entropy = shannon_entropy(data);
+    let iocs = extract_iocs(data);
 
     let mut format = "raw";
     let mut arch = "unknown";
@@ -253,7 +402,6 @@ pub extern "C" fn wasm_analyze_binary(
     let mut patch_candidates: Vec<(usize, &'static str, String)> = Vec::new();
     let mut score: i32 = 0;
 
-    // 1. Format Detection & Structural Parsing
     if data.len() >= 64 && &data[0..2] == b"MZ" {
         if let Some(pe_off_u32) = read_u32_le(data, 0x3C) {
             let pe_off = pe_off_u32 as usize;
@@ -273,13 +421,10 @@ pub extern "C" fn wasm_analyze_binary(
                 let is_pe32_plus = magic == 0x20B;
                 let oep = read_u32_le(data, opt_off + 16).unwrap_or(0);
 
-                // Security Directory (index 4) & TLS Directory (index 9)
                 let dd_off = if is_pe32_plus { opt_off + 112 } else { opt_off + 96 };
                 if let Some(sec_rva) = read_u32_le(data, dd_off + 4 * 8) {
                     let sec_size = read_u32_le(data, dd_off + 4 * 8 + 4).unwrap_or(0);
-                    if sec_rva > 0 && sec_size > 0 {
-                        signed = true;
-                    }
+                    if sec_rva > 0 && sec_size > 0 { signed = true; }
                 }
                 if let Some(tls_rva) = read_u32_le(data, dd_off + 9 * 8) {
                     let tls_size = read_u32_le(data, dd_off + 9 * 8 + 4).unwrap_or(0);
@@ -296,15 +441,9 @@ pub extern "C" fn wasm_analyze_binary(
                 let mut first_exec_seen = false;
                 for i in 0..num_sections.min(64) {
                     let sh = sec_table_off + i * 40;
-                    if sh + 40 > data.len() {
-                        break;
-                    }
+                    if sh + 40 > data.len() { break; }
                     let raw_name = &data[sh..sh + 8];
-                    let name = raw_name
-                        .iter()
-                        .take_while(|&&b| b != 0)
-                        .map(|&b| if b.is_ascii_graphic() { b as char } else { '.' })
-                        .collect::<String>();
+                    let name = raw_name.iter().take_while(|&&b| b != 0).map(|&b| if b.is_ascii_graphic() { b as char } else { '.' }).collect::<String>();
                     let vsize = read_u32_le(data, sh + 8).unwrap_or(0);
                     let va = read_u32_le(data, sh + 12).unwrap_or(0);
                     let rsize = read_u32_le(data, sh + 16).unwrap_or(0);
@@ -316,31 +455,20 @@ pub extern "C" fn wasm_analyze_binary(
                     let rwx = exec && write && read;
 
                     let end = (roff as usize).saturating_add(rsize as usize).min(data.len());
-                    if end > max_raw_end {
-                        max_raw_end = end;
-                    }
-                    let sec_slice = if (roff as usize) < end {
-                        &data[roff as usize..end]
-                    } else {
-                        &[]
-                    };
+                    if end > max_raw_end { max_raw_end = end; }
+                    let sec_slice = if (roff as usize) < end { &data[roff as usize..end] } else { &[] };
                     let ent = shannon_entropy(sec_slice);
 
                     if exec && !first_exec_seen {
                         first_exec_seen = true;
-                        if oep >= va && oep < va.saturating_add(vsize.max(rsize)) {
-                            oep_in_first_exec = true;
-                        }
+                        if oep >= va && oep < va.saturating_add(vsize.max(rsize)) { oep_in_first_exec = true; }
                     }
-
                     let lname = name.to_ascii_lowercase();
                     if rwx {
                         anomalies.push("RWX_SECTION".to_string());
                         indicators.push(format!("Section '{}' is Read+Write+Execute (RWX)", name));
                         score += 22;
-                        if roff > 0 {
-                            patch_candidates.push((roff as usize, "RET_ZERO", format!("Neutralize RWX section '{}'", name)));
-                        }
+                        if roff > 0 { patch_candidates.push((roff as usize, "RET_ZERO", format!("Neutralize RWX section '{}'", name))); }
                     }
                     if exec && ent >= 7.25 && rsize >= 4096 {
                         is_packed = true;
@@ -352,28 +480,15 @@ pub extern "C" fn wasm_analyze_binary(
                         anomalies.push("SUSPICIOUS_SECTION".to_string());
                         indicators.push(format!("Suspicious section name '{}'", name));
                         score += 20;
-                        if roff > 0 {
-                            patch_candidates.push((roff as usize, "RET_ZERO", format!("Neutralize suspicious section '{}'", name)));
-                        }
+                        if roff > 0 { patch_candidates.push((roff as usize, "RET_ZERO", format!("Neutralize suspicious section '{}'", name))); }
                     }
-
-                    sections.push(SectionInfo {
-                        name,
-                        va,
-                        raw_offset: roff,
-                        raw_size: rsize,
-                        entropy: ent,
-                        rwx,
-                        executable: exec,
-                    });
+                    sections.push(SectionInfo { name, va, raw_offset: roff, raw_size: rsize, entropy: ent, rwx, executable: exec });
                 }
-
                 if first_exec_seen && !oep_in_first_exec && oep != 0 {
                     anomalies.push("OEP_OUTSIDE_TEXT".to_string());
                     indicators.push(format!("Entry point RVA 0x{:X} is outside primary code section", oep));
                     score += 20;
                 }
-
                 if max_raw_end > 0 && data.len() > max_raw_end + 512 && !signed {
                     let overlay_len = data.len() - max_raw_end;
                     let ov_ent = shannon_entropy(&data[max_raw_end..]);
@@ -396,9 +511,7 @@ pub extern "C" fn wasm_analyze_binary(
             let phnum = read_u16_le(data, 56).unwrap_or(0) as usize;
             for i in 0..phnum.min(32) {
                 let p = phoff + i * phentsize;
-                if p + 56 > data.len() {
-                    break;
-                }
+                if p + 56 > data.len() { break; }
                 let p_type = read_u32_le(data, p).unwrap_or(0);
                 let p_flags = read_u32_le(data, p + 4).unwrap_or(0);
                 let p_offset = u64::from_le_bytes(data[p + 8..p + 16].try_into().unwrap()) as u32;
@@ -407,35 +520,18 @@ pub extern "C" fn wasm_analyze_binary(
                 if p_type == 1 {
                     let rwx = (p_flags & 7) == 7;
                     let end = (p_offset as usize).saturating_add(p_filesz as usize).min(data.len());
-                    let ent = if (p_offset as usize) < end {
-                        shannon_entropy(&data[p_offset as usize..end])
-                    } else {
-                        0.0
-                    };
+                    let ent = if (p_offset as usize) < end { shannon_entropy(&data[p_offset as usize..end]) } else { 0.0 };
                     if rwx {
                         anomalies.push("ELF_RWX_SEGMENT".to_string());
                         indicators.push(format!("ELF PT_LOAD segment #{} is RWX", i));
                         score += 28;
                         patch_candidates.push((p_offset as usize, "RET_ZERO", format!("Neutralize ELF RWX segment #{}", i)));
                     }
-                    sections.push(SectionInfo {
-                        name: format!("PT_LOAD_{}", i),
-                        va: p_vaddr,
-                        raw_offset: p_offset,
-                        raw_size: p_filesz,
-                        entropy: ent,
-                        rwx,
-                        executable: (p_flags & 1) != 0,
-                    });
+                    sections.push(SectionInfo { name: format!("PT_LOAD_{}", i), va: p_vaddr, raw_offset: p_offset, raw_size: p_filesz, entropy: ent, rwx, executable: (p_flags & 1) != 0 });
                 }
             }
         }
-    } else if data.len() >= 28
-        && (&data[0..4] == b"\xcf\xfa\xed\xfe"
-            || &data[0..4] == b"\xce\xfa\xed\xfe"
-            || &data[0..4] == b"\xfe\xed\xfa\xcf"
-            || &data[0..4] == b"\xca\xfe\xba\xbe")
-    {
+    } else if data.len() >= 28 && (&data[0..4] == b"\xcf\xfa\xed\xfe" || &data[0..4] == b"\xce\xfa\xed\xfe" || &data[0..4] == b"\xfe\xed\xfa\xcf" || &data[0..4] == b"\xca\xfe\xba\xbe") {
         format = "mach-o";
         arch = "Mach-O";
         if find_ascii_ci(data, b"DYLD_INSERT_LIBRARIES").is_some() {
@@ -447,9 +543,7 @@ pub extern "C" fn wasm_analyze_binary(
         if find_bytes(data, b"AndroidManifest.xml").is_some() || find_bytes(data, b"classes.dex").is_some() {
             format = "apk";
             arch = "Android/DEX";
-            if find_bytes(data, b"META-INF/").is_some() {
-                signed = true;
-            }
+            if find_bytes(data, b"META-INF/").is_some() { signed = true; }
             for (perm, pts) in [
                 (&b"BIND_ACCESSIBILITY_SERVICE"[..], 24),
                 (&b"READ_SMS"[..], 18),
@@ -467,24 +561,12 @@ pub extern "C" fn wasm_analyze_binary(
         }
     }
 
-    // 2. Suspicious API Scan
     let api_catalog: &[(&[u8], i32)] = &[
-        (b"SetWindowsHookEx", 18),
-        (b"GetAsyncKeyState", 16),
-        (b"GetKeyState", 12),
-        (b"VirtualAllocEx", 16),
-        (b"WriteProcessMemory", 18),
-        (b"CreateRemoteThread", 20),
-        (b"NtUnmapViewOfSection", 22),
-        (b"SetThreadContext", 16),
-        (b"ResumeThread", 10),
-        (b"OpenProcess", 8),
-        (b"IsDebuggerPresent", 8),
-        (b"CryptEncrypt", 14),
-        (b"URLDownloadToFile", 16),
-        (b"WinExec", 14),
-        (b"ShellExecute", 8),
-        (b"RegSetValueEx", 10),
+        (b"SetWindowsHookEx", 18), (b"GetAsyncKeyState", 16), (b"GetKeyState", 12),
+        (b"VirtualAllocEx", 16), (b"WriteProcessMemory", 18), (b"CreateRemoteThread", 20),
+        (b"NtUnmapViewOfSection", 22), (b"SetThreadContext", 16), (b"ResumeThread", 10),
+        (b"OpenProcess", 8), (b"IsDebuggerPresent", 8), (b"CryptEncrypt", 14),
+        (b"URLDownloadToFile", 16), (b"WinExec", 14), (b"ShellExecute", 8), (b"RegSetValueEx", 10),
     ];
     for &(api, pts) in api_catalog {
         if find_bytes(data, api).is_some() {
@@ -493,7 +575,6 @@ pub extern "C" fn wasm_analyze_binary(
         }
     }
 
-    // 3. Built-in YARA-style Binary & IOC Signatures
     let yara_sigs: &[(&'static str, &'static str, &[u8], bool, i32, &'static str)] = &[
         ("BS_x64_PEB_Walk_Shellcode", "CRITICAL", b"\x65\x48\x8b\x04\x25\x60\x00\x00\x00", false, 35, "Direct x64 GS:[0x60] PEB walk shellcode"),
         ("BS_x86_PEB_Walk_Shellcode", "CRITICAL", b"\x64\xa1\x30\x00\x00\x00", false, 32, "Direct x86 FS:[0x30] PEB walk shellcode"),
@@ -520,120 +601,64 @@ pub extern "C" fn wasm_analyze_binary(
         indicators.push("Binary is not digitally signed".to_string());
         score += 8;
     }
+    if score > 100 { score = 100; }
+    let severity = if score >= 75 { "CRITICAL" } else if score >= 50 { "HIGH" } else if score >= 25 { "MEDIUM" } else { "LOW" };
 
-    if score > 100 {
-        score = 100;
-    }
-    let severity = if score >= 75 {
-        "CRITICAL"
-    } else if score >= 50 {
-        "HIGH"
-    } else if score >= 25 {
-        "MEDIUM"
-    } else {
-        "LOW"
-    };
-
-    // Build canonical format_scan_for_ai() string matching BinShield-SecNet-v2 training format
-    let kind = match format {
-        "apk" => "APK_SCAN",
-        "elf" => "ELF_SCAN",
-        "mach-o" => "MACHO_SCAN",
-        _ => "PE_SCAN",
-    };
+    let kind = match format { "apk" => "APK_SCAN", "elf" => "ELF_SCAN", "mach-o" => "MACHO_SCAN", _ => "PE_SCAN" };
     let anoms_str = if anomalies.is_empty() { "none".to_string() } else { anomalies.join(",") };
-    let yara_str = if yara_hits.is_empty() {
-        "none".to_string()
-    } else {
-        yara_hits.iter().map(|h| h.rule).collect::<Vec<_>>().join(",")
-    };
-    let apis_str = if suspicious_apis.is_empty() {
-        "none".to_string()
-    } else {
-        suspicious_apis.iter().take(12).cloned().collect::<Vec<_>>().join(",")
-    };
-    let inds_str = if indicators.is_empty() {
-        "none".to_string()
-    } else {
-        indicators.iter().take(5).cloned().collect::<Vec<_>>().join("; ")
-    };
+    let yara_str = if yara_hits.is_empty() { "none".to_string() } else { yara_hits.iter().map(|h| h.rule).collect::<Vec<_>>().join(",") };
+    let apis_str = if suspicious_apis.is_empty() { "none".to_string() } else { suspicious_apis.iter().take(12).cloned().collect::<Vec<_>>().join(",") };
+    let inds_str = if indicators.is_empty() { "none".to_string() } else { indicators.iter().take(5).cloned().collect::<Vec<_>>().join("; ") };
     let ai_feature_text = format!(
         "{} name={} score={} severity={} signed={} packed={} anoms={} yara={} apis={} indicators={}",
         kind, filename, score, severity, signed, is_packed, anoms_str, yara_str, apis_str, inds_str
     );
 
-    // Serialize JSON response
-    let mut j = String::with_capacity(2048);
+    let (cfg_nodes, cfg_edges) = build_cfg_graph(data, &sections, &yara_hits, &suspicious_apis);
+
+    let mut j = String::with_capacity(4096);
     j.push('{');
-    j.push_str(&format!("\"filename\":\"{}\",", json_escape(&filename)));
-    j.push_str(&format!("\"size\":{},", data.len()));
-    j.push_str(&format!("\"sha256\":\"{}\",", sha256));
-    j.push_str(&format!("\"type\":\"{}\",", format));
-    j.push_str(&format!("\"arch\":\"{}\",", arch));
-    j.push_str(&format!("\"entropy\":{:.3},", overall_entropy));
-    j.push_str(&format!("\"signed\":{},", signed));
-    j.push_str(&format!("\"is_packed\":{},", is_packed));
-    j.push_str(&format!("\"risk_score\":{},", score));
-    j.push_str(&format!("\"severity\":\"{}\",", severity));
-    j.push_str(&format!("\"ai_feature_text\":\"{}\",", json_escape(&ai_feature_text)));
+    j.push_str(&format!("\"engine\":\"binshield-rust-core-v4\",\"filename\":\"{}\",\"size\":{},\"sha256\":\"{}\",\"type\":\"{}\",\"arch\":\"{}\",\"entropy\":{:.3},\"signed\":{},\"is_packed\":{},\"risk_score\":{},\"severity\":\"{}\",\"ai_feature_text\":\"{}\",",
+        json_escape(&filename), data.len(), sha256, format, arch, overall_entropy, signed, is_packed, score, severity, json_escape(&ai_feature_text)));
 
     j.push_str("\"anomalies\":[");
-    for (i, a) in anomalies.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        j.push_str(&format!("\"{}\"", json_escape(a)));
-    }
-    j.push_str("],");
-
-    j.push_str("\"suspicious_imports\":[");
-    for (i, a) in suspicious_apis.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        j.push_str(&format!("\"{}\"", json_escape(a)));
-    }
-    j.push_str("],");
-
-    j.push_str("\"indicators\":[");
-    for (i, ind) in indicators.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        j.push_str(&format!("\"{}\"", json_escape(ind)));
-    }
-    j.push_str("],");
-
-    j.push_str("\"yara_matches\":[");
+    for (i, a) in anomalies.iter().enumerate() { if i > 0 { j.push(','); } j.push_str(&format!("\"{}\"", json_escape(a))); }
+    j.push_str("],\"suspicious_imports\":[");
+    for (i, a) in suspicious_apis.iter().enumerate() { if i > 0 { j.push(','); } j.push_str(&format!("\"{}\"", json_escape(a))); }
+    j.push_str("],\"indicators\":[");
+    for (i, ind) in indicators.iter().enumerate() { if i > 0 { j.push(','); } j.push_str(&format!("\"{}\"", json_escape(ind))); }
+    j.push_str("],\"iocs\":[");
+    for (i, ioc) in iocs.iter().enumerate() { if i > 0 { j.push(','); } j.push_str(&format!("\"{}\"", json_escape(ioc))); }
+    j.push_str("],\"yara_matches\":[");
     for (i, h) in yara_hits.iter().enumerate() {
         if i > 0 { j.push(','); }
-        j.push_str(&format!(
-            "{{\"rule_name\":\"{}\",\"severity\":\"{}\",\"offset\":{},\"description\":\"{}\"}}",
-            h.rule, h.severity, h.offset, json_escape(h.description)
-        ));
+        j.push_str(&format!("{{\"rule_name\":\"{}\",\"severity\":\"{}\",\"offset\":{},\"description\":\"{}\"}}", h.rule, h.severity, h.offset, json_escape(h.description)));
     }
-    j.push_str("],");
-
-    j.push_str("\"sections\":[");
+    j.push_str("],\"sections\":[");
     for (i, s) in sections.iter().enumerate() {
         if i > 0 { j.push(','); }
-        j.push_str(&format!(
-            "{{\"name\":\"{}\",\"va\":{},\"raw_offset\":{},\"raw_size\":{},\"entropy\":{:.3},\"rwx\":{},\"executable\":{}}}",
-            json_escape(&s.name), s.va, s.raw_offset, s.raw_size, s.entropy, s.rwx, s.executable
-        ));
+        j.push_str(&format!("{{\"name\":\"{}\",\"va\":{},\"raw_offset\":{},\"raw_size\":{},\"entropy\":{:.3},\"rwx\":{},\"executable\":{}}}", json_escape(&s.name), s.va, s.raw_offset, s.raw_size, s.entropy, s.rwx, s.executable));
     }
-    j.push_str("],");
-
-    j.push_str("\"patch_candidates\":[");
+    j.push_str("],\"patch_candidates\":[");
     for (i, (off, strat, desc)) in patch_candidates.iter().enumerate() {
         if i > 0 { j.push(','); }
-        j.push_str(&format!(
-            "{{\"offset\":{},\"strategy\":\"{}\",\"reason\":\"{}\"}}",
-            off, strat, json_escape(desc)
-        ));
+        j.push_str(&format!("{{\"offset\":{},\"strategy\":\"{}\",\"reason\":\"{}\"}}", off, strat, json_escape(desc)));
     }
-    j.push_str("]}");
+    j.push_str("],\"cfg\":{\"nodes\":[");
+    for (i, n) in cfg_nodes.iter().enumerate() {
+        if i > 0 { j.push(','); }
+        j.push_str(&format!("{{\"id\":\"{}\",\"label\":\"{}\",\"offset\":{},\"size\":{},\"risk\":{},\"kind\":\"{}\"}}", json_escape(&n.id), json_escape(&n.label), n.offset, n.size, n.risk, n.kind));
+    }
+    j.push_str("],\"edges\":[");
+    for (i, e) in cfg_edges.iter().enumerate() {
+        if i > 0 { j.push(','); }
+        j.push_str(&format!("{{\"from\":\"{}\",\"to\":\"{}\",\"kind\":\"{}\"}}", json_escape(&e.from), json_escape(&e.to), e.kind));
+    }
+    j.push_str("]}}");
 
     store_result(j)
 }
 
-/// Surgically patch a binary buffer in-place inside WebAssembly memory.
-/// strategy_code: 0 = RET_ZERO (31 C0 C3), 1 = RET_ONE (B8 01 00 00 00 C3),
-///                2 = RET_EARLY (C3), 3 = NOP_SLED (90 * patch_len)
 #[no_mangle]
 pub extern "C" fn wasm_patch_at(
     ptr: *mut u8,
@@ -647,10 +672,10 @@ pub extern "C" fn wasm_patch_at(
     }
     let data = unsafe { slice::from_raw_parts_mut(ptr, len) };
     let patch_bytes: Vec<u8> = match strategy_code {
-        0 => vec![0x31, 0xC0, 0xC3],                   // xor eax, eax; ret
-        1 => vec![0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3], // mov eax, 1; ret
-        2 => vec![0xC3],                               // ret
-        _ => vec![0x90; patch_len.clamp(1, 64)],       // NOP sled
+        0 => vec![0x31, 0xC0, 0xC3],
+        1 => vec![0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3],
+        2 => vec![0xC3],
+        _ => vec![0x90; patch_len.clamp(1, 64)],
     };
     let end = (offset + patch_bytes.len()).min(len);
     let actual_len = end - offset;
@@ -660,10 +685,7 @@ pub extern "C" fn wasm_patch_at(
         orig_hex.push_str(&format!("{:02X}", data[offset + i]));
         data[offset + i] = patch_bytes[i];
         new_hex.push_str(&format!("{:02X}", data[offset + i]));
-        if i + 1 < actual_len {
-            orig_hex.push(' ');
-            new_hex.push(' ');
-        }
+        if i + 1 < actual_len { orig_hex.push(' '); new_hex.push(' '); }
     }
     let new_sha = sha256_hex(data);
     store_result(format!(
