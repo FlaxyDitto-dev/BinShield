@@ -82,7 +82,7 @@ fun OpcodeShieldAppRoot(vm: GhidraGuardViewModel = viewModel()) {
                 title = {
                     Column {
                         Text(
-                            text = "GHIDRAGUARD ANDROID",
+                            text = "OPCODESHIELD ANDROID",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = BorderAccent,
