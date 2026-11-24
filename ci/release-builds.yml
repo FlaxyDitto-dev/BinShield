@@ -18,11 +18,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: .\build.bat
-      - run: .\dist\BinShield-CLI.exe --version
+      - run: .\dist\OpcodeShield-CLI.exe --version
       - if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" dist/BinShield-GUI.exe dist/BinShield-CLI.exe --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/OpcodeShield-GUI.exe dist/OpcodeShield-CLI.exe --clobber
 
   build-linux:
     runs-on: ubuntu-latest
@@ -35,11 +35,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y python3-tk
           chmod +x build_linux.sh
           ./build_linux.sh
-          ./dist/BinShield-CLI-Linux --version
+          ./dist/OpcodeShield-CLI-Linux --version
       - if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" dist/BinShield-GUI-Linux dist/BinShield-CLI-Linux --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/OpcodeShield-GUI-Linux dist/OpcodeShield-CLI-Linux --clobber
 
   build-macos:
     runs-on: macos-latest
@@ -51,12 +51,12 @@ jobs:
       - run: |
           chmod +x build_macos.sh
           ./build_macos.sh
-          cd dist && zip -r BinShield-GUI-macOS.zip BinShield-GUI-macOS.app || true
-          ./BinShield-CLI-macOS --version
+          cd dist && zip -r OpcodeShield-GUI-macOS.zip OpcodeShield-GUI-macOS.app || true
+          ./OpcodeShield-CLI-macOS --version
       - if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" dist/BinShield-CLI-macOS dist/BinShield-GUI-macOS.zip --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/OpcodeShield-CLI-macOS dist/OpcodeShield-GUI-macOS.zip --clobber
 
   build-android:
     runs-on: ubuntu-latest
@@ -74,5 +74,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk "BinShield-Android-${{ github.ref_name }}.apk"
-          gh release upload "${{ github.ref_name }}" "BinShield-Android-${{ github.ref_name }}.apk" --clobber
+          cp android/app/build/outputs/apk/debug/app-debug.apk "OpcodeShield-Android-${{ github.ref_name }}.apk"
+          gh release upload "${{ github.ref_name }}" "OpcodeShield-Android-${{ github.ref_name }}.apk" --clobber

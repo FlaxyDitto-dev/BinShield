@@ -1,5 +1,5 @@
 """
-BinShield - Native Linux ELF & macOS Mach-O Binary Analyzer, Sanitizer & Integrity Verifier
+OpcodeShield - Native Linux ELF & macOS Mach-O Binary Analyzer, Sanitizer & Integrity Verifier
 Zero external dependencies (pure Python stdlib).
 - Linux ELF (32/64-bit): detects RWX PT_LOAD segments, injected executable sections,
   suspicious .init_array / LD_PRELOAD hooks, shellcode/IOCs; strips PF_W from RWX segments

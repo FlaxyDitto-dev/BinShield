@@ -1,5 +1,5 @@
 """
-BinShield - Automated Batch QA Validation Suite (120+ Real Binaries)
+OpcodeShield - Automated Batch QA Validation Suite (120+ Real Binaries)
 Generates, scans, sanitizes, and runtime/integrity-verifies a diverse dataset of:
   - 45 Windows .exe binaries (20 clean baseline + 25 modified/infected, compiled with gcc)
   - 35 Windows .dll binaries (15 clean baseline + 20 modified/infected, compiled with gcc -shared)
@@ -481,7 +481,7 @@ def build_apk(
             zf.writestr(aname, abytes, compress_type=zipfile.ZIP_DEFLATED)
 
         if include_v1_sig:
-            zf.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\nCreated-By: BinShieldQA\r\n")
+            zf.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\nCreated-By: OpcodeShieldQA\r\n")
             zf.writestr("META-INF/CERT.SF", b"Signature-Version: 1.0\r\n")
             zf.writestr("META-INF/CERT.RSA", b"\x30\x82\x00\x20FAKE_V1_TEST_CERT")
 
@@ -595,7 +595,7 @@ __declspec(dllexport) int gg_malicious_helper(void) {{
         CreateRemoteThread(h, NULL, 0, (LPTHREAD_START_ROUTINE)p, NULL, 0, NULL);
         SetWindowsHookExA(WH_KEYBOARD_LL, NULL, NULL, 0);
     }}
-    return 999;  /* Returns 999 when active; returns 0 after BinShield RET_ZERO patch */
+    return 999;  /* Returns 999 when active; returns 0 after OpcodeShield RET_ZERO patch */
 }}
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {{
@@ -680,7 +680,7 @@ def run_batch_qa_suite(work_dir: Optional[Path] = None) -> Dict[str, Any]:
     t0 = time.time()
     cleanup_dir = False
     if work_dir is None:
-        work_dir = Path(tempfile.mkdtemp(prefix="binshield_qa_120_"))
+        work_dir = Path(tempfile.mkdtemp(prefix="opcodeshield_qa_120_"))
         cleanup_dir = True
     else:
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -1151,7 +1151,7 @@ def write_markdown_report(summary: Dict[str, Any], out_md: Path) -> None:
     s = summary["sanitization"]
     ir = summary["integrity_and_runtime"]
     lines = [
-        f"# BinShield Automated Batch QA Validation Report ({summary['total_samples']} Real Binaries)",
+        f"# OpcodeShield Automated Batch QA Validation Report ({summary['total_samples']} Real Binaries)",
         "",
         f"- **Total Samples Tested:** {summary['total_samples']} (`{summary['by_type']['exe']['total']} .exe`, `{summary['by_type']['dll']['total']} .dll`, `{summary['by_type']['apk']['total']} .apk`)",
         f"- **Total Execution Time:** {summary['elapsed_seconds']}s",
@@ -1213,7 +1213,7 @@ if __name__ == "__main__":
     d = summary["detection"]
     s = summary["sanitization"]
     ir = summary["integrity_and_runtime"]
-    print(f"\n================ BINSHIELD {summary['total_samples']}-SAMPLE QA SUMMARY ================")
+    print(f"\n================ OPCODESHIELD {summary['total_samples']}-SAMPLE QA SUMMARY ================")
     print(f"Total Samples : {summary['total_samples']} in {summary['elapsed_seconds']}s")
     print(f"Detection     : Accuracy={d['accuracy_pct']}% | TP={d['tp']} TN={d['tn']} FP={d['fp']} FN={d['fn']} | F1={d['f1_pct']}%")
     print(f"Sanitization  : {s['cleared']}/{s['attempted']} cleared ({s['clearance_rate_pct']}%)")

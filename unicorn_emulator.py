@@ -1,5 +1,5 @@
 """
-BinShield v4.0.0 — Safe CPU Emulation Engine (Unicorn Engine).
+OpcodeShield v4.0.0 — Safe CPU Emulation Engine (Unicorn Engine).
 Safely emulates suspicious x86 / x86_64 / ARM64 shellcode or decryptor stubs inside an
 isolated virtual CPU (zero host OS execution) to unpack XOR/ROT/AES-obfuscated strings,
 C2 URLs, and runtime payloads.

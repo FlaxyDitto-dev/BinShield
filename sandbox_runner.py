@@ -1,5 +1,5 @@
 """
-BinShield - Automated Dynamic Sandbox Verification Runner
+OpcodeShield - Automated Dynamic Sandbox Verification Runner
 Safely runs an executable inside an isolated temporary directory with strict
 timeout, clean environment, Windows Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 to prevent lingering child processes), and captures exit code, stdout/stderr,

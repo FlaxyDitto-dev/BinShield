@@ -1,5 +1,5 @@
 """
-BinShield v4.0.0 — Exportable Security Reports (HTML / SARIF 2.1.0 / JSON)
+OpcodeShield v4.0.0 — Exportable Security Reports (HTML / SARIF 2.1.0 / JSON)
 and Compact Offline SHA-256 Malware Hash Bloom Filter.
 """
 
@@ -77,7 +77,7 @@ def export_sarif(scan_results: List[Dict[str, Any]], output_path: str | Path) ->
         fname = str(item.get("filename") or item.get("name") or "unknown")
         inds = "; ".join(item.get("indicators") or ["Clean binary"])
         results.append({
-            "ruleId": f"BINSHIELD-{sev}",
+            "ruleId": f"OPCODESHIELD-{sev}",
             "level": level,
             "message": {"text": f"{fname}: risk_score={score}/100 ({sev}) — {inds}"},
             "locations": [{"physicalLocation": {"artifactLocation": {"uri": fname}}}],
@@ -94,9 +94,9 @@ def export_sarif(scan_results: List[Dict[str, Any]], output_path: str | Path) ->
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "BinShield",
+                    "name": "OpcodeShield",
                     "version": "4.0.0",
-                    "informationUri": "https://flaxyditto-dev.github.io/BinShield/",
+                    "informationUri": "https://flaxyditto-dev.github.io/OpcodeShield/",
                 }
             },
             "results": results,
@@ -121,7 +121,7 @@ def export_html_report(scan_result: Dict[str, Any], output_path: str | Path) -> 
 
     doc = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BinShield Audit Report — {fname}</title>
+<title>OpcodeShield Audit Report — {fname}</title>
 <style>
 body{{background:#070b14;color:#e6eefc;font-family:system-ui,sans-serif;max-width:960px;margin:24px auto;padding:0 16px}}
 .card{{background:#0e1526;border:1px solid #243352;border-radius:12px;padding:18px;margin-bottom:16px}}
@@ -129,12 +129,12 @@ body{{background:#070b14;color:#e6eefc;font-family:system-ui,sans-serif;max-widt
 .CRITICAL,.HIGH{{color:#fb7185}}.MEDIUM{{color:#fbbf24}}.LOW{{color:#4ade80}}
 code{{font-family:ui-monospace,monospace;word-break:break-all}}
 </style></head><body>
-<h1>BinShield v4.0.0 Security Audit Report</h1>
+<h1>OpcodeShield v4.0.0 Security Audit Report</h1>
 <p style="color:#8fa3c8">Generated {ts}</p>
 <div class="card">
   <h2>{fname} <span class="badge {sev}">{score}/100 ({sev})</span></h2>
   <p><strong>SHA-256:</strong> <code>{sha256}</code></p>
-  <p><strong>AI Verdict (BinShield-SecNet-v3):</strong> {ai_cat} ({float(ai_prob)*100:.1f}% malicious probability)</p>
+  <p><strong>AI Verdict (OpcodeShield-SecNet-v3):</strong> {ai_cat} ({float(ai_prob)*100:.1f}% malicious probability)</p>
 </div>
 <div class="card"><h3>Indicators &amp; Findings</h3><ul>{inds}</ul></div>
 </body></html>"""

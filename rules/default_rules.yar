@@ -1,5 +1,5 @@
 /*
- * BinShield v2.0.0 Default Offline YARA Ruleset
+ * OpcodeShield v2.0.0 Default Offline YARA Ruleset
  * Drop additional .yar / .yara files into this rules/ folder for automatic loading.
  */
 

@@ -1,17 +1,17 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="BinShield"
+  <Package Name="OpcodeShield"
            Manufacturer="FlaxyDitto-Dev"
-           Version="4.0.0.0"
+           Version="4.0.1.0"
            UpgradeCode="E4B9A2F1-7C38-4D15-9A6B-2F1E8D0C4B72"
            Scope="perMachine">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of BinShield is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of OpcodeShield is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="BinShield">
+      <Directory Id="INSTALLFOLDER" Name="OpcodeShield">
         <Directory Id="MODELSDIR" Name="models">
-          <Directory Id="SECNETDIR" Name="BinShield-SecNet-v3" />
+          <Directory Id="SECNETDIR" Name="OpcodeShield-SecNet-v3" />
         </Directory>
         <Directory Id="NATIVEDIR" Name="native" />
         <Directory Id="RULESDIR" Name="rules" />
@@ -19,12 +19,12 @@
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="BinShield" />
+      <Directory Id="ApplicationProgramsFolder" Name="OpcodeShield" />
     </StandardDirectory>
 
     <StandardDirectory Id="DesktopFolder" />
 
-    <Feature Id="MainFeature" Title="BinShield v4.0 Complete Suite (Prebuilt Python + SecNet-v3 AI + Rust Core + Explorer Context Menu)" Level="1">
+    <Feature Id="MainFeature" Title="OpcodeShield v4.0 Complete Suite (Prebuilt Python + SecNet-v3 AI + Rust Core + Explorer Context Menu)" Level="1">
       <ComponentGroupRef Id="AppBinaries" />
       <ComponentGroupRef Id="PreinstalledAiModel" />
       <ComponentGroupRef Id="NativeRustCore" />
@@ -37,31 +37,31 @@
 
     <ComponentGroup Id="AppBinaries" Directory="INSTALLFOLDER">
       <Component Id="GuiExe" Guid="91A2B3C4-1111-4A11-8B11-000000000001">
-        <File Id="BinShieldGuiExe" Source="dist\BinShield-GUI.exe" KeyPath="yes" />
+        <File Id="OpcodeShieldGuiExe" Source="dist\OpcodeShield-GUI.exe" KeyPath="yes" />
       </Component>
       <Component Id="CliExe" Guid="91A2B3C4-2222-4A22-8B22-000000000002">
-        <File Id="BinShieldCliExe" Source="dist\BinShield-CLI.exe" KeyPath="yes" />
+        <File Id="OpcodeShieldCliExe" Source="dist\OpcodeShield-CLI.exe" KeyPath="yes" />
       </Component>
       <Component Id="CliWrapper" Guid="91A2B3C4-3333-4A33-8B33-000000000003">
-        <File Id="BinShieldCmd" Source="installer\binshield.cmd" KeyPath="yes" />
+        <File Id="OpcodeShieldCmd" Source="installer\opcodeshield.cmd" KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
     <ComponentGroup Id="PreinstalledAiModel" Directory="SECNETDIR">
       <Component Id="SecNetOnnx" Guid="91A2B3C4-4444-4A44-8B44-000000000004">
-        <File Id="SecNetInt8Onnx" Source="models\BinShield-SecNet-v3\BinShield-SecNet-v3-int8.onnx" KeyPath="yes" />
+        <File Id="SecNetInt8Onnx" Source="models\OpcodeShield-SecNet-v3\OpcodeShield-SecNet-v3-int8.onnx" KeyPath="yes" />
       </Component>
       <Component Id="SecNetVocab" Guid="91A2B3C4-5555-4A55-8B55-000000000005">
-        <File Id="SecNetVocabJson" Source="models\BinShield-SecNet-v3\BinShield-SecNet-v3-vocab.json" KeyPath="yes" />
+        <File Id="SecNetVocabJson" Source="models\OpcodeShield-SecNet-v3\OpcodeShield-SecNet-v3-vocab.json" KeyPath="yes" />
       </Component>
       <Component Id="SecNetCard" Guid="91A2B3C4-6666-4A66-8B66-000000000006">
-        <File Id="SecNetModelCard" Source="models\BinShield-SecNet-v3\model_card.json" KeyPath="yes" />
+        <File Id="SecNetModelCard" Source="models\OpcodeShield-SecNet-v3\model_card.json" KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
     <ComponentGroup Id="NativeRustCore" Directory="NATIVEDIR">
       <Component Id="RustCoreDll" Guid="91A2B3C4-BBBB-4BBB-8BBB-000000000011">
-        <File Id="BinShieldRustDll" Source="native\binshield_core.dll" KeyPath="yes" />
+        <File Id="OpcodeShieldRustDll" Source="native\opcodeshield_core.dll" KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
@@ -72,29 +72,29 @@
     </ComponentGroup>
 
     <Component Id="SystemPathEntry" Directory="INSTALLFOLDER" Guid="91A2B3C4-8888-4A88-8B88-000000000008">
-      <Environment Id="BinShieldPath" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
-      <RegistryValue Root="HKLM" Key="Software\FlaxyDitto-Dev\BinShield" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      <Environment Id="OpcodeShieldPath" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+      <RegistryValue Root="HKLM" Key="Software\FlaxyDitto-Dev\OpcodeShield" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
     </Component>
 
     <Component Id="ExplorerContextMenu" Directory="INSTALLFOLDER" Guid="91A2B3C4-CCCC-4CCC-8CCC-000000000012">
-      <RegistryKey Root="HKCR" Key="*\shell\BinShieldScan">
-        <RegistryValue Type="string" Value="Scan &amp; Disinfect with BinShield" KeyPath="yes" />
-        <RegistryValue Name="Icon" Type="string" Value="[INSTALLFOLDER]BinShield-GUI.exe,0" />
+      <RegistryKey Root="HKCR" Key="*\shell\OpcodeShieldScan">
+        <RegistryValue Type="string" Value="Scan &amp; Disinfect with OpcodeShield" KeyPath="yes" />
+        <RegistryValue Name="Icon" Type="string" Value="[INSTALLFOLDER]OpcodeShield-GUI.exe,0" />
         <RegistryKey Key="command">
-          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]BinShield-GUI.exe&quot; &quot;%1&quot;" />
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]OpcodeShield-GUI.exe&quot; &quot;%1&quot;" />
         </RegistryKey>
       </RegistryKey>
     </Component>
 
     <Component Id="StartMenuShortcuts" Directory="ApplicationProgramsFolder" Guid="91A2B3C4-9999-4A99-8B99-000000000009">
-      <Shortcut Id="StartMenuGuiShortcut" Name="BinShield" Description="BinShield v4.0 Offline Security &amp; AI Binary Sanitizer" Target="[INSTALLFOLDER]BinShield-GUI.exe" WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="StartMenuGuiShortcut" Name="OpcodeShield" Description="OpcodeShield v4.0 Offline Security &amp; AI Binary Sanitizer" Target="[INSTALLFOLDER]OpcodeShield-GUI.exe" WorkingDirectory="INSTALLFOLDER" />
       <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
-      <RegistryValue Root="HKCU" Key="Software\FlaxyDitto-Dev\BinShield" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\FlaxyDitto-Dev\OpcodeShield" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
     <Component Id="DesktopShortcuts" Directory="DesktopFolder" Guid="91A2B3C4-AAAA-4AAA-8BAA-000000000010">
-      <Shortcut Id="DesktopGuiShortcut" Name="BinShield" Description="BinShield v4.0 Offline Security &amp; AI Binary Sanitizer" Target="[INSTALLFOLDER]BinShield-GUI.exe" WorkingDirectory="INSTALLFOLDER" />
-      <RegistryValue Root="HKCU" Key="Software\FlaxyDitto-Dev\BinShield" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      <Shortcut Id="DesktopGuiShortcut" Name="OpcodeShield" Description="OpcodeShield v4.0 Offline Security &amp; AI Binary Sanitizer" Target="[INSTALLFOLDER]OpcodeShield-GUI.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\FlaxyDitto-Dev\OpcodeShield" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
   </Package>

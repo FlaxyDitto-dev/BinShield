@@ -1,5 +1,5 @@
 """
-BinShield-SecNet-v1 GPU Training Pipeline (v1.1.3 Hardened Dataset)
+OpcodeShield-SecNet-v1 GPU Training Pipeline (v1.1.3 Hardened Dataset)
 Trains our custom 13.9M-parameter 6-layer Transformer directly on the user's NVIDIA GPU
 using the EXACT canonical format_scan_for_ai() schema + diverse clean/malicious pseudo-C
 and hard-negative contrastive pairs so clean real-world apps, emulators, DLLs, and

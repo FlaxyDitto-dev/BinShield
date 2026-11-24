@@ -9,7 +9,7 @@ import java.nio.ByteOrder
 
 /**
  * Pure-Kotlin Streaming Windows PE (.exe / .dll / .sys / .scr) Static Analyzer & Surgical .text Patcher
- * for BinShield Android.
+ * for OpcodeShield Android.
  *
  * Uses RandomAccessFile + 1 MB streaming I/O so there is NO FILE SIZE LIMIT (handles multi-GB
  * game executables with constant O(1) RAM).

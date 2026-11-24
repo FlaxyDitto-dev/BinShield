@@ -1,5 +1,5 @@
 """
-BinShield - Offline YARA Rule Engine
+OpcodeShield - Offline YARA Rule Engine
 Supports user-extensible .yar / .yara rules in rules/.
 Uses native yara-python if installed, with a fast zero-dependency pure-Python YARA
 parser/matcher fallback supporting hex patterns, ASCII/nocase strings, and standard

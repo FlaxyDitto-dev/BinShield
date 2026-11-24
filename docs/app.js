@@ -1,6 +1,6 @@
-// BinShield v4.0.0 WebAssembly & PWA Client-Side Engine
-// 1. binshield_core.wasm (Unified Rust Core) — PE/ELF/Mach-O/APK parser, SHA-256, IOCs, YARA, CFG Graph & Surgical Patcher
-// 2. BinShield-SecNet-v3-int8.onnx via ONNX Runtime Web (WebGPU -> WASM SIMD fallback) — 5-head multi-label neural classifier
+// OpcodeShield v4.0.0 WebAssembly & PWA Client-Side Engine
+// 1. opcodeshield_core.wasm (Unified Rust Core) — PE/ELF/Mach-O/APK parser, SHA-256, IOCs, YARA, CFG Graph & Surgical Patcher
+// 2. OpcodeShield-SecNet-v3-int8.onnx via ONNX Runtime Web (WebGPU -> WASM SIMD fallback) — 5-head multi-label neural classifier
 
 const THREAT_CATEGORIES = [
   "Clean / Benign", "Keylogger / Spyware", "Process Injection / RAT", "C2 / Network Dropper",
@@ -67,7 +67,7 @@ function encodeSecNet(text) {
 
 async function initRustWasm() {
   try {
-    const resp = await fetch("./wasm/binshield_core.wasm");
+    const resp = await fetch("./wasm/opcodeshield_core.wasm");
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const { instance } = await WebAssembly.instantiate(await resp.arrayBuffer(), {});
     state.wasm = instance.exports;
@@ -90,8 +90,8 @@ async function ensureOnnxAiLoaded() {
     ort.env.wasm.numThreads = 1;
 
     const [vocabResp, modelResp] = await Promise.all([
-      fetch("./models/BinShield-SecNet-v3-vocab.json"),
-      fetch("./models/BinShield-SecNet-v3-int8.onnx"),
+      fetch("./models/OpcodeShield-SecNet-v3-vocab.json"),
+      fetch("./models/OpcodeShield-SecNet-v3-int8.onnx"),
     ]);
     if (!vocabResp.ok || !modelResp.ok) throw new Error("Model assets fetch failed");
 
@@ -156,7 +156,7 @@ async function runSecNetInference(featureText) {
   if (isMal && !activeBehaviors.length && topBeh) activeBehaviors.push(topBeh);
 
   return {
-    model: "BinShield-SecNet-v3",
+    model: "OpcodeShield-SecNet-v3",
     backend: state.ortBackend,
     is_malicious: isMal,
     malicious_probability: malProb,
@@ -347,7 +347,7 @@ function buildDemoSample(kind) {
     b.set([0x4d, 0x5a], 0);
     b.set([0x40, 0x00, 0x00, 0x00], 0x3c);
     b.set([0x50, 0x45, 0x00, 0x00, 0x64, 0x86, 0x00, 0x00], 0x40);
-    b.set(new TextEncoder().encode("BinShield v4.0 Demo Benign Utility — Hello World!"), 0x90);
+    b.set(new TextEncoder().encode("OpcodeShield v4.0 Demo Benign Utility — Hello World!"), 0x90);
     return { bytes: b, name: "hello_world_clean.exe" };
   }
   const payload = "SetWindowsHookEx GetAsyncKeyState VirtualAllocEx WriteProcessMemory https://discord.com/api/webhooks/0000/demo keylog.txt ";
@@ -411,8 +411,8 @@ function setupUI() {
   $("btn-export-html").addEventListener("click", () => {
     if (!state.lastReport) return;
     const r = state.lastReport, ai = state.lastAi || {};
-    const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>BinShield Report - ${escapeHtml(r.filename)}</title><style>body{background:#070b14;color:#e6eefc;font-family:system-ui,sans-serif;max-width:900px;margin:20px auto;padding:14px}.c{background:#0e1526;border:1px solid #243352;border-radius:10px;padding:14px;margin-bottom:12px}</style></head><body><h1>BinShield v4.0.0 Audit Report</h1><div class="c"><h2>${escapeHtml(r.filename)} — ${r.risk_score}/100 (${r.severity})</h2><p>SHA-256: <code>${r.sha256}</code></p><p>AI Verdict: ${escapeHtml(ai.category || "N/A")} (${((ai.malicious_probability || 0) * 100).toFixed(1)}%)</p></div><div class="c"><h3>Indicators</h3><ul>${r.indicators.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul></div></body></html>`;
-    downloadText(`binshield_report_${r.filename}.html`, htmlDoc, "text/html");
+    const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>OpcodeShield Report - ${escapeHtml(r.filename)}</title><style>body{background:#070b14;color:#e6eefc;font-family:system-ui,sans-serif;max-width:900px;margin:20px auto;padding:14px}.c{background:#0e1526;border:1px solid #243352;border-radius:10px;padding:14px;margin-bottom:12px}</style></head><body><h1>OpcodeShield v4.0.0 Audit Report</h1><div class="c"><h2>${escapeHtml(r.filename)} — ${r.risk_score}/100 (${r.severity})</h2><p>SHA-256: <code>${r.sha256}</code></p><p>AI Verdict: ${escapeHtml(ai.category || "N/A")} (${((ai.malicious_probability || 0) * 100).toFixed(1)}%)</p></div><div class="c"><h3>Indicators</h3><ul>${r.indicators.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul></div></body></html>`;
+    downloadText(`opcodeshield_report_${r.filename}.html`, htmlDoc, "text/html");
   });
 
   $("btn-export-sarif").addEventListener("click", () => {
@@ -422,22 +422,22 @@ function setupUI() {
       $schema: "https://json.schemastore.org/sarif-2.1.0.json",
       version: "2.1.0",
       runs: [{
-        tool: { driver: { name: "BinShield", version: "4.0.0", informationUri: "https://flaxyditto-dev.github.io/BinShield/" } },
+        tool: { driver: { name: "OpcodeShield", version: "4.0.0", informationUri: "https://flaxyditto-dev.github.io/OpcodeShield/" } },
         results: [{
-          ruleId: `BINSHIELD-${r.severity}`,
+          ruleId: `OPCODESHIELD-${r.severity}`,
           level: r.severity === "CRITICAL" || r.severity === "HIGH" ? "error" : "warning",
           message: { text: `${r.filename}: score=${r.risk_score}/100 (${r.severity}) — ${r.indicators.join("; ")}` },
           locations: [{ physicalLocation: { artifactLocation: { uri: r.filename } } }],
         }],
       }],
     };
-    downloadText(`binshield_${r.filename}.sarif.json`, JSON.stringify(sarif, null, 2), "application/json");
+    downloadText(`opcodeshield_${r.filename}.sarif.json`, JSON.stringify(sarif, null, 2), "application/json");
   });
 
   $("btn-audit-code").addEventListener("click", async () => {
     const code = $("code-input").value.trim();
     if (!code) return;
-    $("code-audit-out").textContent = "Running BinShield-SecNet-v3...";
+    $("code-audit-out").textContent = "Running OpcodeShield-SecNet-v3...";
     const res = await runSecNetInference(code);
     $("code-audit-out").textContent = res ? JSON.stringify(res, null, 2) : "Failed to load ONNX Runtime Web.";
   });

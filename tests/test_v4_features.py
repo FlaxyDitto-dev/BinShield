@@ -1,11 +1,11 @@
 """
-BinShield v4.0.0 — End-to-End Automated Verification Suite.
+OpcodeShield v4.0.0 — End-to-End Automated Verification Suite.
 Verifies:
   1. Unified Native Rust Core DLL (PE/ELF analysis, IOC extraction, CFG graph, surgical patching)
   2. Unicorn Engine Safe CPU Emulation (XOR-encrypted C2 URL decryption in isolated virtual CPU)
   3. Exportable HTML & SARIF 2.1.0 Security Reports + Offline SHA-256 Bloom Filter
-  4. BinShield-SecNet-v3 INT8 ONNX 5-Head Multi-Label AI Inference (clean vs keylogger vs shellcode)
-  5. WebAssembly Core (`docs/wasm/binshield_core.wasm`) + PWA assets (`manifest.json`, `sw.js`)
+  4. OpcodeShield-SecNet-v3 INT8 ONNX 5-Head Multi-Label AI Inference (clean vs keylogger vs shellcode)
+  5. WebAssembly Core (`docs/wasm/opcodeshield_core.wasm`) + PWA assets (`manifest.json`, `sw.js`)
   6. Windows Explorer Context Menu registration module
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from custom_model import BinShieldSecNetClient
+from custom_model import OpcodeShieldSecNetClient
 from report_exporter import ThreatHashBloomFilter, export_html_report, export_sarif
 from rust_core import get_rust_core
 from unicorn_emulator import UnicornEmulator
@@ -67,21 +67,21 @@ def main() -> None:
         html_p = export_html_report(res, Path(td) / "report.html")
         sarif_data = json.loads(sarif_p.read_text(encoding="utf-8"))
         assert sarif_data["version"] == "2.1.0" and len(sarif_data["runs"][0]["results"]) == 1
-        assert "BinShield v4.0.0 Security Audit Report" in html_p.read_text(encoding="utf-8")
+        assert "OpcodeShield v4.0.0 Security Audit Report" in html_p.read_text(encoding="utf-8")
     print("[PASS] 3. HTML / SARIF 2.1.0 Report Exporter & Offline SHA-256 Bloom Filter")
 
-    # 4. BinShield-SecNet-v3 INT8 ONNX 5-Head Multi-Label AI
-    client = BinShieldSecNetClient(device="onnx", model_dir=Path("models/BinShield-SecNet-v3"))
+    # 4. OpcodeShield-SecNet-v3 INT8 ONNX 5-Head Multi-Label AI
+    client = OpcodeShieldSecNetClient(device="onnx", model_dir=Path("models/OpcodeShield-SecNet-v3"))
     clean_pred = client.predict("PE_SCAN name=retroarch.exe score=4 severity=LOW signed=true packed=false anoms=none yara=none apis=none indicators=none")
     mal_pred = client.predict(res["ai_feature_text"])
     assert not clean_pred["is_malicious"], f"Clean FP: {clean_pred}"
     assert mal_pred["is_malicious"] and len(mal_pred["behaviors"]) >= 1, f"Malicious FN/missing behaviors: {mal_pred}"
-    print(f"[PASS] 4. BinShield-SecNet-v3 INT8 ONNX (clean=CLN, mal={mal_pred['category']}, behaviors={mal_pred['behaviors']}, urgency={mal_pred['patch_urgency']}%)")
+    print(f"[PASS] 4. OpcodeShield-SecNet-v3 INT8 ONNX (clean=CLN, mal={mal_pred['category']}, behaviors={mal_pred['behaviors']}, urgency={mal_pred['patch_urgency']}%)")
 
     # 5. WebAssembly + PWA Artifacts
     for req_file in [
         "docs/index.html", "docs/app.js", "docs/styles.css", "docs/manifest.json", "docs/sw.js",
-        "docs/wasm/binshield_core.wasm", "docs/models/BinShield-SecNet-v3-int8.onnx", "docs/models/BinShield-SecNet-v3-vocab.json",
+        "docs/wasm/opcodeshield_core.wasm", "docs/models/OpcodeShield-SecNet-v3-int8.onnx", "docs/models/OpcodeShield-SecNet-v3-vocab.json",
     ]:
         assert Path(req_file).exists(), f"Missing PWA/WASM file: {req_file}"
     print("[PASS] 5. Compact PWA & WebAssembly Assets Verified")
@@ -91,7 +91,7 @@ def main() -> None:
     assert callable(context_menu.register_context_menu) and callable(context_menu.unregister_context_menu)
     print("[PASS] 6. Windows Explorer Right-Click Context Menu Module Verified")
 
-    print("\nALL 6/6 BINSHIELD v4.0.0 FEATURE & MAJOR UPGRADE TESTS PASSED 100%!")
+    print("\nALL 6/6 OPCODESHIELD v4.0.0 FEATURE & MAJOR UPGRADE TESTS PASSED 100%!")
 
 
 if __name__ == "__main__":

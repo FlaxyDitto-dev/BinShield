@@ -1,5 +1,5 @@
 """
-Train BinShield-SecNet-v3 (v4.0.0) on NVIDIA CUDA GPU (RTX 5060 Ti).
+Train OpcodeShield-SecNet-v3 (v4.0.0) on NVIDIA CUDA GPU (RTX 5060 Ti).
 Upgrades SecNet-v2 with:
   - 5 output heads:
       1. mal_logit       [B]     (binary malicious vs benign)
@@ -37,7 +37,7 @@ BEHAVIOR_LABELS = [
 ]
 
 
-class BinShieldSecNetV3(nn.Module):
+class OpcodeShieldSecNetV3(nn.Module):
     def __init__(self, vocab_size: int = 8192, d_model: int = 384, nhead: int = 6, num_layers: int = 6, dim_ff: int = 1536, max_len: int = 256):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_model, padding_idx=0)
@@ -171,7 +171,7 @@ def main() -> None:
     train_loader = DataLoader(to_tensors(train_data), batch_size=128, shuffle=True)
     val_loader = DataLoader(to_tensors(val_data), batch_size=256)
 
-    model = BinShieldSecNetV3(vocab_size=max(8192, len(tok.vocab))).to(device)
+    model = OpcodeShieldSecNetV3(vocab_size=max(8192, len(tok.vocab))).to(device)
     params = sum(p.numel() for p in model.parameters())
     print(f"[SecNet-v3] Parameters: {params:,}")
 
@@ -207,13 +207,13 @@ def main() -> None:
                 total += ids.size(0)
         print(f"Epoch {epoch}/4 | loss={total_loss/len(train_loader):.4f} | mal={m_ok/total*100:.2f}% cat={c_ok/total*100:.2f}% strat={s_ok/total*100:.2f}% beh={b_ok/total*100:.2f}%")
 
-    out_dir = Path("models/BinShield-SecNet-v3")
+    out_dir = Path("models/OpcodeShield-SecNet-v3")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Save vocab with behavior_labels
-    vocab_path = out_dir / "BinShield-SecNet-v3-vocab.json"
+    vocab_path = out_dir / "OpcodeShield-SecNet-v3-vocab.json"
     vocab_payload = {
-        "model_name": "BinShield-SecNet-v3",
+        "model_name": "OpcodeShield-SecNet-v3",
         "max_len": tok.max_len,
         "vocab_size": len(tok.vocab),
         "categories": THREAT_CATEGORIES,
@@ -225,13 +225,13 @@ def main() -> None:
 
     # Save FP16 safetensors
     from safetensors.torch import save_file
-    st_path = out_dir / "BinShield-SecNet-v3.safetensors"
+    st_path = out_dir / "OpcodeShield-SecNet-v3.safetensors"
     save_file({k: v.detach().cpu().half() for k, v in model.state_dict().items()}, str(st_path))
 
     # Export ONNX & INT8 quantize
     model_cpu = model.cpu().float().eval()
-    fp32_onnx = out_dir / "BinShield-SecNet-v3-fp32.onnx"
-    int8_onnx = out_dir / "BinShield-SecNet-v3-int8.onnx"
+    fp32_onnx = out_dir / "OpcodeShield-SecNet-v3-fp32.onnx"
+    int8_onnx = out_dir / "OpcodeShield-SecNet-v3-int8.onnx"
     dummy = torch.ones((1, 256), dtype=torch.long)
     torch.onnx.export(
         model_cpu,
@@ -248,7 +248,7 @@ def main() -> None:
 
     elapsed = round(time.time() - t0, 2)
     card = {
-        "model_name": "BinShield-SecNet-v3",
+        "model_name": "OpcodeShield-SecNet-v3",
         "revision": "v4.0.0-multilabel",
         "parameters": params,
         "onnx_mb": round(int8_onnx.stat().st_size / (1024 * 1024), 2),

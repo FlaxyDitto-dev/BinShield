@@ -1,4 +1,4 @@
-# BinShield Automated Batch QA Validation Report (210 Real Binaries)
+# OpcodeShield Automated Batch QA Validation Report (210 Real Binaries)
 
 - **Total Samples Tested:** 210 (`75 .exe`, `65 .dll`, `70 .apk`)
 - **Total Execution Time:** 27.9s

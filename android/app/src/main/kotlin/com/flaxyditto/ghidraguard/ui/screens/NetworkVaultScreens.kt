@@ -52,12 +52,12 @@ import com.flaxyditto.ghidraguard.ui.theme.BorderGlass
 import com.flaxyditto.ghidraguard.ui.theme.TextMuted
 import com.flaxyditto.ghidraguard.ui.theme.TextPrimary
 import com.flaxyditto.ghidraguard.ui.theme.TextSecondary
-import com.flaxyditto.ghidraguard.viewmodel.BinShieldUiState
+import com.flaxyditto.ghidraguard.viewmodel.OpcodeShieldUiState
 import com.flaxyditto.ghidraguard.viewmodel.GhidraGuardViewModel
 
 @Composable
 fun NetworkScreen(
-    state: BinShieldUiState,
+    state: OpcodeShieldUiState,
     vm: GhidraGuardViewModel,
 ) {
     val scroll = rememberScrollState()
@@ -179,7 +179,7 @@ fun NetworkScreen(
 
 @Composable
 fun VaultScreen(
-    state: BinShieldUiState,
+    state: OpcodeShieldUiState,
     vm: GhidraGuardViewModel,
 ) {
     val scroll = rememberScrollState()
@@ -199,7 +199,7 @@ fun VaultScreen(
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("XOR-Neutralized Quarantine Vault", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Samples are neutralized with 0x5A XOR on their first 4KB header (matching desktop BinShield) so they cannot execute or install.",
+                    "Samples are neutralized with 0x5A XOR on their first 4KB header (matching desktop OpcodeShield) so they cannot execute or install.",
                     color = TextSecondary,
                     fontSize = 12.sp,
                 )
@@ -256,7 +256,7 @@ fun VaultScreen(
 
 @Composable
 fun SettingsScreen(
-    state: BinShieldUiState,
+    state: OpcodeShieldUiState,
     vm: GhidraGuardViewModel,
 ) {
     val context = LocalContext.current

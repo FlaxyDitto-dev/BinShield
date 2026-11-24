@@ -1,5 +1,5 @@
 """
-BinShield - End-to-End Custom AI Model (BinShield-SecNet-v1) & Sanitization Verification Suite
+OpcodeShield - End-to-End Custom AI Model (OpcodeShield-SecNet-v1) & Sanitization Verification Suite
 Verifies BOTH PyTorch GPU and ONNX Runtime backends across:
   1. 10 real-world clean emulators & DLLs (0% FP required)
   2. 8 clean & malicious Ghidra pseudo-C functions (100% accuracy required)
@@ -28,7 +28,7 @@ from custom_model import (
     MODEL_ONNX_FILENAME,
     MODEL_VOCAB_FILENAME,
     MODEL_WEIGHTS_FILENAME,
-    BinShieldSecNetClient,
+    OpcodeShieldSecNetClient,
     SecNetTokenizer,
     _build_secnet_module,
     format_scan_for_ai,
@@ -77,8 +77,8 @@ def main() -> None:
     if not onnx_path.is_file():
         export_onnx_from_safetensors()
 
-    ai_gpu = BinShieldSecNetClient(device="gpu", log_callback=print)
-    ai_ort = BinShieldSecNetClient(device="onnx", log_callback=print)
+    ai_gpu = OpcodeShieldSecNetClient(device="gpu", log_callback=print)
+    ai_ort = OpcodeShieldSecNetClient(device="onnx", log_callback=print)
 
     real_clean = [
         r"C:\RetroArch-Win64\retroarch.exe",

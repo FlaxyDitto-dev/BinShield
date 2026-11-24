@@ -1,5 +1,5 @@
 """
-BinShield - SHA-256 Verified Rollback Manager & Patch Hex/Disassembly Diff Viewer
+OpcodeShield - SHA-256 Verified Rollback Manager & Patch Hex/Disassembly Diff Viewer
 Saves verified backup snapshots before any sanitization/patch, generates concise
 byte + disassembly diffs between original and patched binaries, and provides one-click
 rollback restoration.
@@ -44,9 +44,9 @@ class RollbackManager:
         if base_dir is not None:
             root = Path(base_dir)
         elif os.name == "nt":
-            root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "BinShield" / "rollbacks"
+            root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "OpcodeShield" / "rollbacks"
         else:
-            root = Path.home() / ".binshield" / "rollbacks"
+            root = Path.home() / ".opcodeshield" / "rollbacks"
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root / "index.json"

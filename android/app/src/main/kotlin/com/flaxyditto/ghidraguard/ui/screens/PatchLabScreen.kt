@@ -33,12 +33,12 @@ import com.flaxyditto.ghidraguard.ui.theme.BorderGlass
 import com.flaxyditto.ghidraguard.ui.theme.TextMuted
 import com.flaxyditto.ghidraguard.ui.theme.TextPrimary
 import com.flaxyditto.ghidraguard.ui.theme.TextSecondary
-import com.flaxyditto.ghidraguard.viewmodel.BinShieldUiState
+import com.flaxyditto.ghidraguard.viewmodel.OpcodeShieldUiState
 import com.flaxyditto.ghidraguard.viewmodel.GhidraGuardViewModel
 
 @Composable
 fun PatchLabScreen(
-    state: BinShieldUiState,
+    state: OpcodeShieldUiState,
     vm: GhidraGuardViewModel,
 ) {
     val target = state.activeTarget

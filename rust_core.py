@@ -1,5 +1,5 @@
 """
-BinShield v4.0.0 — Unified Native Rust Core Python Bridge (`binshield_core.dll` / `libbinshield_core.so`).
+OpcodeShield v4.0.0 — Unified Native Rust Core Python Bridge (`opcodeshield_core.dll` / `libopcodeshield_core.so`).
 Provides 10-50x faster native PE/ELF/Mach-O/APK analysis, SHA-256, IOC extraction,
 CFG/Call-Graph extraction, and surgical in-memory patching via ctypes, with automatic fallback.
 """
@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 
 
 def _find_native_lib() -> Optional[Path]:
-    lib_name = "binshield_core.dll" if os.name == "nt" else ("libbinshield_core.dylib" if sys.platform == "darwin" else "libbinshield_core.so")
+    lib_name = "opcodeshield_core.dll" if os.name == "nt" else ("libopcodeshield_core.dylib" if sys.platform == "darwin" else "libopcodeshield_core.so")
     candidates = []
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
@@ -30,7 +30,7 @@ def _find_native_lib() -> Optional[Path]:
 
 
 class RustCoreEngine:
-    """Zero-overhead ctypes wrapper around the compiled BinShield Rust Core."""
+    """Zero-overhead ctypes wrapper around the compiled OpcodeShield Rust Core."""
 
     def __init__(self) -> None:
         self.lib_path = _find_native_lib()

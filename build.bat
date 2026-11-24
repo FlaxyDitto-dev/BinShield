@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================================
-echo   BinShield Standalone Windows Builder - PyInstaller
+echo   OpcodeShield Standalone Windows Builder - PyInstaller
 echo ============================================================
 
 where py >nul 2>&1
@@ -33,12 +33,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [*] Compiling BinShield-GUI.exe with UAC Administrator manifest + ONNX Runtime AI...
+echo [*] Compiling OpcodeShield-GUI.exe with UAC Administrator manifest + ONNX Runtime AI...
 ".venv\Scripts\pyinstaller.exe" ^
     --noconsole ^
     --onefile ^
     --uac-admin ^
-    --name "BinShield-GUI" ^
+    --name "OpcodeShield-GUI" ^
     --collect-all customtkinter ^
     --collect-all onnxruntime ^
     --exclude-module torch ^
@@ -55,11 +55,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [*] Compiling BinShield-CLI.exe (headless CLI + self-contained ONNX Runtime AI)...
+echo [*] Compiling OpcodeShield-CLI.exe (headless CLI + self-contained ONNX Runtime AI)...
 ".venv\Scripts\pyinstaller.exe" ^
     --console ^
     --onefile ^
-    --name "BinShield-CLI" ^
+    --name "OpcodeShield-CLI" ^
     --collect-all onnxruntime ^
     --exclude-module customtkinter ^
     --exclude-module tkinter ^
@@ -79,7 +79,7 @@ if errorlevel 1 (
 
 echo.
 echo [+] Build succeeded! Standalone executables created at:
-echo     %cd%\dist\BinShield-GUI.exe
-echo     %cd%\dist\BinShield-CLI.exe
+echo     %cd%\dist\OpcodeShield-GUI.exe
+echo     %cd%\dist\OpcodeShield-CLI.exe
 echo.
 endlocal

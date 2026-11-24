@@ -1,5 +1,5 @@
 """
-BinShield - Direct Local CUDA & Flash Attention AI Engine
+OpcodeShield - Direct Local CUDA & Flash Attention AI Engine
 Runs local causal LLMs directly in-process via PyTorch + Transformers on NVIDIA CUDA
 with Flash Attention (FlashAttention-2 when `flash_attn` is installed, or PyTorch's
 native CUDA SDPA Flash Attention kernel `SDPBackend.FLASH_ATTENTION`).

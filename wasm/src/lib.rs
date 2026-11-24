@@ -1,7 +1,7 @@
-// BinShield Unified Core v4.0.0 — Compiles identically to:
-//   - WebAssembly: docs/wasm/binshield_core.wasm  (--target wasm32-unknown-unknown --crate-type=cdylib)
-//   - Windows DLL: native/binshield_core.dll      (--crate-type=cdylib)
-//   - Linux .so:   native/libbinshield_core.so    (--crate-type=cdylib)
+// OpcodeShield Unified Core v4.0.0 — Compiles identically to:
+//   - WebAssembly: docs/wasm/opcodeshield_core.wasm  (--target wasm32-unknown-unknown --crate-type=cdylib)
+//   - Windows DLL: native/opcodeshield_core.dll      (--crate-type=cdylib)
+//   - Linux .so:   native/libopcodeshield_core.so    (--crate-type=cdylib)
 // Zero external crate dependencies for instant reproducible cross-platform builds.
 
 use std::alloc::{alloc, dealloc, Layout};
@@ -618,7 +618,7 @@ pub extern "C" fn wasm_analyze_binary(
 
     let mut j = String::with_capacity(4096);
     j.push('{');
-    j.push_str(&format!("\"engine\":\"binshield-rust-core-v4\",\"filename\":\"{}\",\"size\":{},\"sha256\":\"{}\",\"type\":\"{}\",\"arch\":\"{}\",\"entropy\":{:.3},\"signed\":{},\"is_packed\":{},\"risk_score\":{},\"severity\":\"{}\",\"ai_feature_text\":\"{}\",",
+    j.push_str(&format!("\"engine\":\"opcodeshield-rust-core-v4\",\"filename\":\"{}\",\"size\":{},\"sha256\":\"{}\",\"type\":\"{}\",\"arch\":\"{}\",\"entropy\":{:.3},\"signed\":{},\"is_packed\":{},\"risk_score\":{},\"severity\":\"{}\",\"ai_feature_text\":\"{}\",",
         json_escape(&filename), data.len(), sha256, format, arch, overall_entropy, signed, is_packed, score, severity, json_escape(&ai_feature_text)));
 
     j.push_str("\"anomalies\":[");

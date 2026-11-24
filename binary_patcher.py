@@ -1,5 +1,5 @@
 """
-BinShield - PE Binary Patcher, Signature Stripper, Checksum Fixer & Quarantine Vault
+OpcodeShield - PE Binary Patcher, Signature Stripper, Checksum Fixer & Quarantine Vault
 Performs surgical byte-level patching on Windows PE (.exe / .dll) executable sections
 using pefile (with optional LIEF integration), strips invalidated Authenticode signatures,
 recalculates PE header checksums, and manages backups and an isolated Quarantine Vault.
@@ -766,7 +766,7 @@ class QuarantineManager:
         self._log = log_callback or (lambda msg: None)
         root = Path(
             base_dir
-            or os.path.join(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()), "BinShield")
+            or os.path.join(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()), "OpcodeShield")
         )
         self.quarantine_dir = root / "quarantine"
         self.backup_dir = root / "backups"

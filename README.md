@@ -1,10 +1,10 @@
-# BinShield (`v2.1.0`)
+# OpcodeShield (`v2.1.0`)
 
-**BinShield** is a **100% free, local, offline** security scanner, disassembler, sandbox, and surgical binary sanitizer for **Windows, Linux, macOS, Google Colab, and Android** (`.exe`, `.dll`, `.apk`, `.so`, `.elf`, `.dylib`).
+**OpcodeShield** is a **100% free, local, offline** security scanner, disassembler, sandbox, and surgical binary sanitizer for **Windows, Linux, macOS, Google Colab, and Android** (`.exe`, `.dll`, `.apk`, `.so`, `.elf`, `.dylib`).
 
-- **One-Click Windows `.msi` Installer (`BinShield-v2.1.0-Setup-x64.msi`):** Automatically installs everything with **prebuilt Python 3.13 + preinstalled `BinShield-SecNet-v2` INT8 AI model + YARA rules + Capstone + Start Menu/Desktop shortcuts + System `PATH`** (`binshield` works in any terminal immediately, 100% offline with zero downloads required!).
+- **One-Click Windows `.msi` Installer (`OpcodeShield-v2.1.0-Setup-x64.msi`):** Automatically installs everything with **prebuilt Python 3.13 + preinstalled `OpcodeShield-SecNet-v2` INT8 AI model + YARA rules + Capstone + Start Menu/Desktop shortcuts + System `PATH`** (`opcodeshield` works in any terminal immediately, 100% offline with zero downloads required!).
 
-- **Custom Trained Multimodal AI (`BinShield-SecNet-v2`):** 13.9M-parameter Transformer trained on NVIDIA RTX 5060 Ti across Ghidra pseudo-C, raw x86/x64/ARM64 opcodes, PE/APK/ELF/Mach-O structure, and YARA hits — exported as **INT8 Quantized ONNX (~14 MB, 2–3× faster on CPU/NPU)** + **FP16 Safetensors (~26.5 MB for CUDA/MPS/XPU)** with fast auto-download from GitHub Releases CDN.
+- **Custom Trained Multimodal AI (`OpcodeShield-SecNet-v2`):** 13.9M-parameter Transformer trained on NVIDIA RTX 5060 Ti across Ghidra pseudo-C, raw x86/x64/ARM64 opcodes, PE/APK/ELF/Mach-O structure, and YARA hits — exported as **INT8 Quantized ONNX (~14 MB, 2–3× faster on CPU/NPU)** + **FP16 Safetensors (~26.5 MB for CUDA/MPS/XPU)** with fast auto-download from GitHub Releases CDN.
 - **Full-Stack Security Suite (`v2.0.0`):**
   - **Windows PE + Android APK + Linux ELF + macOS Mach-O** deep detection & integrity-preserving sanitization
   - **Offline YARA Rule Engine** (`rules/default_rules.yar`, drop custom `.yar` files anytime)
@@ -14,15 +14,15 @@
   - **Direct Ghidra-Free Capstone Disassembler & UPX Auto-Unpacker** (`disasm`)
   - **Automated Dynamic Sandbox Runner** (`sandbox` with Windows Job Object isolation)
   - **One-Click Self-Replace Auto-Updater** (automatic on GUI/Android/Colab; explicit `update` command on CLI)
-- **Prebuilt Releases:** Download standalone executables (`BinShield-GUI.exe`, `BinShield-CLI.exe`, `BinShield-GUI-Linux`, `BinShield-CLI-Linux`, `BinShield-Android-v2.0.0.apk`), INT8 AI weights, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/BinShield/releases/latest).
-- **Google Colab:** Open [`BinShield_Colab.ipynb`](https://colab.research.google.com/github/FlaxyDitto-dev/BinShield/blob/main/BinShield_Colab.ipynb) directly in Colab with free GPU acceleration.
+- **Prebuilt Releases:** Download standalone executables (`OpcodeShield-GUI.exe`, `OpcodeShield-CLI.exe`, `OpcodeShield-GUI-Linux`, `OpcodeShield-CLI-Linux`, `OpcodeShield-Android-v2.0.0.apk`), INT8 AI weights, and source archives from the [Releases page](https://github.com/FlaxyDitto-dev/OpcodeShield/releases/latest).
+- **Google Colab:** Open [`OpcodeShield_Colab.ipynb`](https://colab.research.google.com/github/FlaxyDitto-dev/OpcodeShield/blob/main/OpcodeShield_Colab.ipynb) directly in Colab with free GPU acceleration.
 
 ---
 
 ## How to Use
 
-### 1. Windows GUI (`BinShield-GUI.exe` or `main.py`)
-1. Launch **`BinShield-GUI.exe`** (runs elevated with UAC for process/DLL/registry/scheduled-task inspection) or run from source:
+### 1. Windows GUI (`OpcodeShield-GUI.exe` or `main.py`)
+1. Launch **`OpcodeShield-GUI.exe`** (runs elevated with UAC for process/DLL/registry/scheduled-task inspection) or run from source:
    ```powershell
    python main.py
    ```
@@ -33,35 +33,35 @@
 4. **Quarantine Vault:** Safely isolate unpatchable threats with XOR neutralization (restore or permanently delete at any time).
 5. **Live Network Monitor:** Inspect active TCP/UDP connections mapped to PIDs and executable paths.
 
-### 2. Windows Headless CLI (`BinShield-CLI.exe` or `cli.py`)
+### 2. Windows Headless CLI (`OpcodeShield-CLI.exe` or `cli.py`)
 Works on Windows PE binaries (`.exe`, `.dll`, `.sys`, `.scr`, `.asi`, `.ocx`), Android `.apk` files, and entire folders.
 
 ```powershell
 # Scan a single file (.exe, .dll, or .apk)
-.\BinShield-CLI.exe scan "C:\path\to\app.exe"
+.\OpcodeShield-CLI.exe scan "C:\path\to\app.exe"
 
 # Recursively scan a folder (add --json for machine-readable output)
-.\BinShield-CLI.exe scan "C:\path\to\game_folder" --json
+.\OpcodeShield-CLI.exe scan "C:\path\to\game_folder" --json
 
 # Sanitize an infected binary to a clean output file (never overwrites original unless specified)
-.\BinShield-CLI.exe sanitize "C:\path\to\infected.exe" -o "C:\path\to\cleaned.exe"
-.\BinShield-CLI.exe sanitize "C:\path\to\infected.apk" -o "C:\path\to\cleaned.apk"
+.\OpcodeShield-CLI.exe sanitize "C:\path\to\infected.exe" -o "C:\path\to\cleaned.exe"
+.\OpcodeShield-CLI.exe sanitize "C:\path\to\infected.apk" -o "C:\path\to\cleaned.apk"
 
 # Verify structural integrity (PE headers/sections/CheckSum or APK ZIP/AXML/DEX/ELF)
-.\BinShield-CLI.exe verify "C:\path\to\cleaned.exe"
-.\BinShield-CLI.exe verify "C:\path\to\cleaned.apk"
+.\OpcodeShield-CLI.exe verify "C:\path\to\cleaned.exe"
+.\OpcodeShield-CLI.exe verify "C:\path\to\cleaned.apk"
 
-# Run custom trained BinShield-SecNet-v1 AI model (auto-downloads ~26.5 MB on first run)
-.\BinShield-CLI.exe ai-scan "C:\path\to\app.exe"
+# Run custom trained OpcodeShield-SecNet-v1 AI model (auto-downloads ~26.5 MB on first run)
+.\OpcodeShield-CLI.exe ai-scan "C:\path\to\app.exe"
 
 # Explicit CLI update command (CLI never auto-updates on normal commands)
-.\BinShield-CLI.exe update --check
-.\BinShield-CLI.exe update
+.\OpcodeShield-CLI.exe update --check
+.\OpcodeShield-CLI.exe update
 ```
 
-*(If running from Python source instead of the compiled `.exe`, replace `.\BinShield-CLI.exe` with `python cli.py`.)*
+*(If running from Python source instead of the compiled `.exe`, replace `.\OpcodeShield-CLI.exe` with `python cli.py`.)*
 
-### 3. Android App (`BinShield` APK)
+### 3. Android App (`OpcodeShield` APK)
 1. Install the built APK on Android 8.0+ (API 26+). The app requests **zero `INTERNET` permission** and works 100% offline.
 2. **Scanner Tab:** Scan installed apps, pick a manual `.apk`, or pick a Windows `.exe` / `.dll` file from device storage.
 3. **Patch Lab Tab:** Inspect flagged native `.so` ELF libraries or Windows PE `.text` sections, run on-device MediaPipe LLM auditing (optional `.task`/`.litertlm`/`.bin` model) or the built-in static analyzer, and export a sanitized copy.
@@ -78,27 +78,27 @@ Works on Windows PE binaries (`.exe`, `.dll`, `.sys`, `.scr`, `.asi`, `.ocx`), A
 
 ### Option A: One-Click Build (`build.bat`)
 ```powershell
-git clone https://github.com/FlaxyDitto-dev/BinShield.git
-cd BinShield
+git clone https://github.com/FlaxyDitto-dev/OpcodeShield.git
+cd OpcodeShield
 .\build.bat
 ```
 This automatically creates `.venv`, installs dependencies from `requirements.txt`, and builds both standalone executables:
-- `dist\BinShield-GUI.exe` (desktop GUI with UAC manifest)
-- `dist\BinShield-CLI.exe` (headless CLI)
+- `dist\OpcodeShield-GUI.exe` (desktop GUI with UAC manifest)
+- `dist\OpcodeShield-CLI.exe` (headless CLI)
 
 ### Option B: Manual PyInstaller Build
 ```powershell
 pip install -r requirements.txt
 
 # Build GUI executable
-pyinstaller --noconsole --onefile --uac-admin --name "BinShield-GUI" ^
+pyinstaller --noconsole --onefile --uac-admin --name "OpcodeShield-GUI" ^
   --collect-all customtkinter ^
   --exclude-module torch --exclude-module transformers --exclude-module accelerate ^
   --exclude-module sympy --exclude-module numpy --exclude-module safetensors --exclude-module tokenizers ^
   --clean main.py
 
 # Build CLI executable
-pyinstaller --console --onefile --name "BinShield-CLI" ^
+pyinstaller --console --onefile --name "OpcodeShield-CLI" ^
   --exclude-module customtkinter --exclude-module tkinter ^
   --exclude-module torch --exclude-module transformers --exclude-module accelerate ^
   --exclude-module sympy --exclude-module numpy --exclude-module safetensors --exclude-module tokenizers ^
@@ -123,17 +123,17 @@ sudo apt-get install -y python3-tk   # required for CustomTkinter GUI
 chmod +x build_linux.sh
 ./build_linux.sh
 ```
-Outputs `dist/BinShield-GUI-Linux` and `dist/BinShield-CLI-Linux`.
+Outputs `dist/OpcodeShield-GUI-Linux` and `dist/OpcodeShield-CLI-Linux`.
 
 ### macOS (`build_macos.sh`)
 ```bash
 chmod +x build_macos.sh
 ./build_macos.sh
 ```
-Outputs `dist/BinShield-GUI-macOS.app` and `dist/BinShield-CLI-macOS`.
+Outputs `dist/OpcodeShield-GUI-macOS.app` and `dist/OpcodeShield-CLI-macOS`.
 
 ### Google Colab
-Open `BinShield_Colab.ipynb` in Google Colab — Cell 1 automatically updates BinShield and downloads `BinShield-SecNet-v1` onto the Colab GPU, and Cell 2 lets you upload, scan, AI-audit, sanitize, and download cleaned `.exe`/`.dll`/`.apk` files.
+Open `OpcodeShield_Colab.ipynb` in Google Colab — Cell 1 automatically updates OpcodeShield and downloads `OpcodeShield-SecNet-v1` onto the Colab GPU, and Cell 2 lets you upload, scan, AI-audit, sanitize, and download cleaned `.exe`/`.dll`/`.apk` files.
 
 ---
 
@@ -195,6 +195,6 @@ cd android
 | `ghidra_engine.py` | Ghidra Headless auto-discovery & Java pseudo-C export bridge |
 | `ai_auditor.py` / `cuda_engine.py` | Direct in-process PyTorch CUDA + Flash Attention multi-pass AI auditor |
 | `auto_setup.py` | Automatic bootstrapper for JDK 21, Ghidra, and PyTorch CUDA |
-| `build.bat` | One-click PyInstaller builder for `BinShield-GUI.exe` & `BinShield-CLI.exe` |
+| `build.bat` | One-click PyInstaller builder for `OpcodeShield-GUI.exe` & `OpcodeShield-CLI.exe` |
 | `android/` | 100% offline native Kotlin + Jetpack Compose Android edition |
 | `tests/batch_qa_suite.py` | Automated 210-sample real binary QA validation pipeline |

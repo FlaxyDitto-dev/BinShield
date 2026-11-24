@@ -14,11 +14,11 @@ data class AndroidUpdateInfo(
 )
 
 /**
- * Automatic GitHub Releases update checker for BinShield Android Edition.
+ * Automatic GitHub Releases update checker for OpcodeShield Android Edition.
  */
 object UpdateChecker {
     const val CURRENT_VERSION = "2.1.0"
-    private const val API_URL = "https://api.github.com/repos/FlaxyDitto-dev/BinShield/releases/latest"
+    private const val API_URL = "https://api.github.com/repos/FlaxyDitto-dev/OpcodeShield/releases/latest"
 
     fun checkLatestRelease(): AndroidUpdateInfo {
         return try {
@@ -26,13 +26,13 @@ object UpdateChecker {
                 requestMethod = "GET"
                 connectTimeout = 8000
                 readTimeout = 8000
-                setRequestProperty("User-Agent", "BinShield-Android/$CURRENT_VERSION")
+                setRequestProperty("User-Agent", "OpcodeShield-Android/$CURRENT_VERSION")
                 setRequestProperty("Accept", "application/vnd.github+json")
             }
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
             val tag = json.optString("tag_name", CURRENT_VERSION).trimStart('v', 'V')
-            val htmlUrl = json.optString("html_url", "https://github.com/FlaxyDitto-dev/BinShield/releases")
+            val htmlUrl = json.optString("html_url", "https://github.com/FlaxyDitto-dev/OpcodeShield/releases")
             var apkUrl = ""
             val assets = json.optJSONArray("assets")
             if (assets != null) {
@@ -56,7 +56,7 @@ object UpdateChecker {
                 currentVersion = CURRENT_VERSION,
                 latestVersion = CURRENT_VERSION,
                 updateAvailable = false,
-                releaseUrl = "https://github.com/FlaxyDitto-dev/BinShield/releases",
+                releaseUrl = "https://github.com/FlaxyDitto-dev/OpcodeShield/releases",
                 error = e.message,
             )
         }

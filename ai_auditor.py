@@ -1,5 +1,5 @@
 """
-BinShield - Direct Local AI Multi-Pass Malware Auditor & Iterative Disinfection Loop
+OpcodeShield - Direct Local AI Multi-Pass Malware Auditor & Iterative Disinfection Loop
 Loads and runs local AI models directly in-process via PyTorch CUDA + Flash Attention
 (zero Ollama, zero external HTTP server), audits Ghidra pseudo-C, parses strict JSON
 patch plans, applies byte-level patches, and iteratively re-verifies up to 5 passes.
@@ -22,15 +22,15 @@ from cuda_engine import (
     CUDAFlashAttentionEngine,
     DEFAULT_LOCAL_MODEL,
 )
-from custom_model import BinShieldSecNetClient, MODEL_NAME as CUSTOM_SECNET_MODEL
+from custom_model import OpcodeShieldSecNetClient, MODEL_NAME as CUSTOM_SECNET_MODEL
 from ghidra_engine import GhidraAnalysisResult, GhidraEngine
 
 
 # ---------------------------------------------------------------------------
-# Default Custom Trained Local Model (BinShield-SecNet-v1, Auto-Downloaded)
+# Default Custom Trained Local Model (OpcodeShield-SecNet-v1, Auto-Downloaded)
 # ---------------------------------------------------------------------------
 
-DEFAULT_AUTO_MODEL = CUSTOM_SECNET_MODEL  # BinShield-SecNet-v1 (custom trained on RTX 5060 Ti)
+DEFAULT_AUTO_MODEL = CUSTOM_SECNET_MODEL  # OpcodeShield-SecNet-v1 (custom trained on RTX 5060 Ti)
 
 # Functions that must NEVER be patched (entrypoints, CRT/libs, stdio/prints, GUI frameworks)
 PROTECTED_EXACT_NAMES = {
@@ -254,14 +254,14 @@ class DirectLocalAIClient:
         self.precision = precision
         self._log = log_callback or (lambda msg: None)
         self._engine: Optional[CUDAFlashAttentionEngine] = None
-        self._secnet: Optional[BinShieldSecNetClient] = None
+        self._secnet: Optional[OpcodeShieldSecNetClient] = None
 
     def _is_custom_secnet(self) -> bool:
         low = self.model.strip().lower()
-        if low in (CUSTOM_SECNET_MODEL.lower(), "binshield-secnet-v1", "binshield-secnet-v2", "secnet", "binshield-secnet"):
+        if low in (CUSTOM_SECNET_MODEL.lower(), "opcodeshield-secnet-v1", "opcodeshield-secnet-v2", "secnet", "opcodeshield-secnet"):
             return True
         # Inside standalone frozen .exe / MSI installs (no torch/transformers), automatically
-        # route to the preinstalled BinShield-SecNet-v2 ONNX model instead of failing!
+        # route to the preinstalled OpcodeShield-SecNet-v2 ONNX model instead of failing!
         try:
             import torch  # noqa: F401
             import transformers  # noqa: F401
@@ -270,7 +270,7 @@ class DirectLocalAIClient:
             return True
 
     def list_models(self) -> List[str]:
-        """List custom BinShield-SecNet-v1 first, plus locally cached HuggingFace models."""
+        """List custom OpcodeShield-SecNet-v1 first, plus locally cached HuggingFace models."""
         models = [CUSTOM_SECNET_MODEL]
         for m in CUDAFlashAttentionEngine.list_local_models():
             if m not in models:
@@ -288,7 +288,7 @@ class DirectLocalAIClient:
             self.model = default_model
         if self._is_custom_secnet():
             if self._secnet is None:
-                self._secnet = BinShieldSecNetClient(use_cuda=self.use_cuda, log_callback=log)
+                self._secnet = OpcodeShieldSecNetClient(use_cuda=self.use_cuda, log_callback=log)
             self._secnet.ensure_loaded()
             return CUSTOM_SECNET_MODEL
         if self._engine is None or self._engine.model_id != self.model:
@@ -309,7 +309,7 @@ class DirectLocalAIClient:
             self._engine.unload()
 
     def query_json(self, system_prompt: str, user_prompt: str) -> str:
-        """Run direct in-process inference (BinShield-SecNet-v1 or HF CUDA LLM) and return JSON."""
+        """Run direct in-process inference (OpcodeShield-SecNet-v1 or HF CUDA LLM) and return JSON."""
         if self._is_custom_secnet():
             if self._secnet is None or not self._secnet.is_loaded:
                 self.ensure_model_ready()
@@ -452,7 +452,7 @@ class AIAuditorPipeline:
 
         work_dir = Path(
             os.environ.get("LOCALAPPDATA", tempfile.gettempdir()),
-            "BinShield",
+            "OpcodeShield",
             "patch_sessions",
             f"{Path(target_path).stem}_{int(time.time())}",
         )

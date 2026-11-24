@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GhidraGuardTheme {
-                BinShieldAppRoot()
+                OpcodeShieldAppRoot()
             }
         }
     }
@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BinShieldAppRoot(vm: GhidraGuardViewModel = viewModel()) {
+fun OpcodeShieldAppRoot(vm: GhidraGuardViewModel = viewModel()) {
     val state by vm.uiState.collectAsState()
 
     val tabs = listOf(
