@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="OpcodeShield"
            Manufacturer="FlaxyDitto-Dev"
-           Version="4.0.1.0"
+           Version="4.1.0.0"
            UpgradeCode="E4B9A2F1-7C38-4D15-9A6B-2F1E8D0C4B72"
            Scope="perMachine">
 

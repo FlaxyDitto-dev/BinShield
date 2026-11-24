@@ -561,12 +561,111 @@ pub extern "C" fn wasm_analyze_binary(
         }
     }
 
+    // Source code / script language detection for any-file inspection
+    if format == "raw" {
+        let low_fn = filename.to_ascii_lowercase();
+        let src_lang = if low_fn.ends_with(".py") || low_fn.ends_with(".pyw") { "python" }
+            else if low_fn.ends_with(".rs") { "rust" }
+            else if low_fn.ends_with(".js") || low_fn.ends_with(".mjs") || low_fn.ends_with(".cjs") { "javascript" }
+            else if low_fn.ends_with(".ts") { "typescript" }
+            else if low_fn.ends_with(".ps1") || low_fn.ends_with(".psm1") { "powershell" }
+            else if low_fn.ends_with(".bat") || low_fn.ends_with(".cmd") { "batch" }
+            else if low_fn.ends_with(".sh") || low_fn.ends_with(".bash") { "shell" }
+            else if low_fn.ends_with(".c") || low_fn.ends_with(".h") { "c" }
+            else if low_fn.ends_with(".cpp") || low_fn.ends_with(".hpp") { "cpp" }
+            else if low_fn.ends_with(".go") { "go" }
+            else if low_fn.ends_with(".java") || low_fn.ends_with(".kt") { "jvm" }
+            else if low_fn.ends_with(".cs") { "csharp" }
+            else if low_fn.ends_with(".php") { "php" }
+            else if low_fn.ends_with(".rb") { "ruby" }
+            else if low_fn.ends_with(".vbs") { "vbscript" }
+            else { "" };
+        if !src_lang.is_empty() {
+            format = src_lang;
+            arch = "source";
+        }
+    }
+
+    // PyInstaller MEI CArchive detection & TOC inspection (zero execution)
+    let mut pyi_detected = false;
+    let mut pyi_pyver = String::new();
+    let mut pyi_scripts: Vec<String> = Vec::new();
+    let pyi_cookie = b"MEI\x0c\x0b\x0a\x0b\x0e";
+    if data.len() >= 88 {
+        if let Some(rev_pos) = data.windows(pyi_cookie.len()).rposition(|w| w == pyi_cookie) {
+            pyi_detected = true;
+            anomalies.push("PYINSTALLER_ARCHIVE".to_string());
+            let mut pkg_len: usize = 0;
+            let mut toc_off: usize = 0;
+            let mut toc_len: usize = 0;
+            let mut cookie_sz: usize = 0;
+            if rev_pos + 88 <= data.len() {
+                pkg_len = u32::from_be_bytes([data[rev_pos+8], data[rev_pos+9], data[rev_pos+10], data[rev_pos+11]]) as usize;
+                toc_off = u32::from_be_bytes([data[rev_pos+12], data[rev_pos+13], data[rev_pos+14], data[rev_pos+15]]) as usize;
+                toc_len = u32::from_be_bytes([data[rev_pos+16], data[rev_pos+17], data[rev_pos+18], data[rev_pos+19]]) as usize;
+                let pv = u32::from_be_bytes([data[rev_pos+20], data[rev_pos+21], data[rev_pos+22], data[rev_pos+23]]);
+                if pkg_len > 0 && pkg_len <= data.len() && toc_len < pkg_len {
+                    cookie_sz = 88;
+                    pyi_pyver = if pv >= 100 { format!("{}.{}", pv / 100, pv % 100) } else { format!("{}", pv) };
+                }
+            }
+            if cookie_sz > 0 {
+                let ov_start = (rev_pos + cookie_sz).saturating_sub(pkg_len);
+                let mut pos = ov_start.saturating_add(toc_off);
+                let toc_end = pos.saturating_add(toc_len).min(data.len());
+                let mut toc_cnt = 0usize;
+                while pos + 18 <= toc_end && toc_cnt < 512 {
+                    let esz = u32::from_be_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+                    let tcode = data[pos + 17];
+                    if esz < 18 || pos + esz > toc_end { break; }
+                    let nbytes = &data[pos + 18 .. pos + esz];
+                    let ename = nbytes.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect::<String>();
+                    if tcode == b's' && !ename.starts_with("pyi_") && !ename.starts_with("pyiboot") && pyi_scripts.len() < 16 {
+                        pyi_scripts.push(ename.clone());
+                    }
+                    let elow = ename.to_ascii_lowercase();
+                    for &(rmod, rpts) in &[("pynput", 28), ("keyboard", 24), ("mss", 18), ("browser_cookie3", 32), ("win32crypt", 26), ("telebot", 26), ("discord_webhook", 28), ("pyautogui", 16)] {
+                        if elow.contains(rmod) {
+                            suspicious_apis.push(format!("PyInstaller:{}", rmod));
+                            indicators.push(format!("PyInstaller bundles RAT/stealer module '{}'", rmod));
+                            score += rpts;
+                        }
+                    }
+                    toc_cnt += 1;
+                    pos += esz;
+                }
+                indicators.push(format!("PyInstaller v{} archive detected ({} TOC entries, scripts: {})", pyi_pyver, toc_cnt, if pyi_scripts.is_empty() { "none".to_string() } else { pyi_scripts.join(", ") }));
+            } else {
+                indicators.push("PyInstaller MEI archive cookie detected".to_string());
+            }
+        }
+    }
+
+    // Cross-language source-code RAT / Stealer heuristics (Python, Rust, JS, PowerShell, Shell, C, Go)
+    let has_socket_kw = find_ascii_ci(data, b"socket").is_some() || find_ascii_ci(data, b"TcpStream::connect").is_some() || find_ascii_ci(data, b"TCPClient").is_some();
+    let has_shell_kw = find_ascii_ci(data, b"subprocess").is_some() || find_ascii_ci(data, b"Command::new").is_some() || find_ascii_ci(data, b"child_process").is_some() || find_ascii_ci(data, b"pty.spawn").is_some();
+    if has_socket_kw && has_shell_kw {
+        indicators.push("RAT Reverse-Shell Pattern: combines network socket connection with OS command/shell execution".to_string());
+        suspicious_apis.push("RAT_ReverseShell_Combo".to_string());
+        score += 44;
+    }
+    if (find_ascii_ci(data, b"exec(").is_some() || find_ascii_ci(data, b"eval(").is_some())
+        && (find_ascii_ci(data, b"b64decode").is_some() || find_ascii_ci(data, b"zlib.decompress").is_some() || find_ascii_ci(data, b"Buffer.from").is_some())
+    {
+        indicators.push("Obfuscated Stager: dynamic exec/eval on base64/compressed payload".to_string());
+        suspicious_apis.push("Obfuscated_Exec_Stager".to_string());
+        score += 36;
+    }
+
     let api_catalog: &[(&[u8], i32)] = &[
         (b"SetWindowsHookEx", 18), (b"GetAsyncKeyState", 16), (b"GetKeyState", 12),
         (b"VirtualAllocEx", 16), (b"WriteProcessMemory", 18), (b"CreateRemoteThread", 20),
         (b"NtUnmapViewOfSection", 22), (b"SetThreadContext", 16), (b"ResumeThread", 10),
         (b"OpenProcess", 8), (b"IsDebuggerPresent", 8), (b"CryptEncrypt", 14),
         (b"URLDownloadToFile", 16), (b"WinExec", 14), (b"ShellExecute", 8), (b"RegSetValueEx", 10),
+        (b"CryptUnprotectData", 26), (b"browser_cookie3", 30), (b"pynput.keyboard", 28),
+        (b"Add-MpPreference", 32), (b"DisableRealtimeMonitoring", 34), (b"std::mem::transmute", 24),
+        (b"TcpStream::connect", 16), (b"Net.Sockets.TCPClient", 30), (b"Invoke-Expression", 24),
     ];
     for &(api, pts) in api_catalog {
         if find_bytes(data, api).is_some() {
@@ -586,6 +685,8 @@ pub extern "C" fn wasm_analyze_binary(
         ("BS_LD_PRELOAD_Hijack", "HIGH", b"LD_PRELOAD", false, 24, "Linux LD_PRELOAD library hijack string"),
         ("BS_Keylogger_Log_Marker", "HIGH", b"keylog", true, 18, "Keylogger artifact / log string"),
         ("BS_Reverse_Shell_Bash", "CRITICAL", b"/dev/tcp/", false, 32, "Unix /dev/tcp reverse shell payload"),
+        ("BS_Browser_Cred_Stealer", "HIGH", b"Login Data", false, 26, "Chromium browser credential database target"),
+        ("BS_Registry_Run_Persist", "HIGH", b"CurrentVersion\\Run", true, 22, "Windows Registry Run-key persistence"),
     ];
     for &(rule, sev, pat, ci, pts, desc) in yara_sigs {
         let pos = if ci { find_ascii_ci(data, pat) } else { find_bytes(data, pat) };
@@ -618,8 +719,8 @@ pub extern "C" fn wasm_analyze_binary(
 
     let mut j = String::with_capacity(4096);
     j.push('{');
-    j.push_str(&format!("\"engine\":\"opcodeshield-rust-core-v4\",\"filename\":\"{}\",\"size\":{},\"sha256\":\"{}\",\"type\":\"{}\",\"arch\":\"{}\",\"entropy\":{:.3},\"signed\":{},\"is_packed\":{},\"risk_score\":{},\"severity\":\"{}\",\"ai_feature_text\":\"{}\",",
-        json_escape(&filename), data.len(), sha256, format, arch, overall_entropy, signed, is_packed, score, severity, json_escape(&ai_feature_text)));
+    j.push_str(&format!("\"engine\":\"opcodeshield-rust-core-v4.1\",\"filename\":\"{}\",\"size\":{},\"sha256\":\"{}\",\"type\":\"{}\",\"arch\":\"{}\",\"entropy\":{:.3},\"signed\":{},\"is_packed\":{},\"is_pyinstaller\":{},\"pyinstaller_pyver\":\"{}\",\"risk_score\":{},\"severity\":\"{}\",\"ai_feature_text\":\"{}\",",
+        json_escape(&filename), data.len(), sha256, format, arch, overall_entropy, signed, is_packed, pyi_detected, json_escape(&pyi_pyver), score, severity, json_escape(&ai_feature_text)));
 
     j.push_str("\"anomalies\":[");
     for (i, a) in anomalies.iter().enumerate() { if i > 0 { j.push(','); } j.push_str(&format!("\"{}\"", json_escape(a))); }

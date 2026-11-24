@@ -43,14 +43,29 @@ from unix_binary_engine import (
 )
 from updater import APP_VERSION, apply_self_update, check_for_updates, download_update
 from yara_engine import YaraRuleEngine
+from pyinstaller_inspector import inspect_pyinstaller_binary
+from source_analyzer import SOURCE_EXT_MAP, analyze_any_file
 
-ALL_SUPPORTED_EXTS = PE_SCAN_EXTENSIONS + (".apk", ".so", ".elf", ".dylib")
+ALL_SUPPORTED_EXTS = PE_SCAN_EXTENSIONS + (".apk", ".so", ".elf", ".dylib") + tuple(SOURCE_EXT_MAP.keys())
 _YARA = YaraRuleEngine()
 
 
 def _scan_one(path: Path) -> Dict[str, Any]:
     low = path.name.lower()
+    ext = path.suffix.lower()
     yara_hits = [asdict(m) for m in _YARA.scan_file(str(path))]
+
+    # Source code & scripts (Python, Rust, JS/TS, PowerShell, Shell, C/C++, Go, etc.)
+    if ext in SOURCE_EXT_MAP:
+        sres = analyze_any_file(path)
+        sres["name"] = path.name
+        sres["path"] = str(path)
+        sres["yara_matches"] = yara_hits
+        sres.setdefault("anomalies", [])
+        if yara_hits and sres["risk_score"] < 50:
+            sres["risk_score"] = min(100, sres["risk_score"] + 30)
+            sres["severity"] = "CRITICAL" if sres["risk_score"] >= 75 else ("HIGH" if sres["risk_score"] >= 50 else "MEDIUM")
+        return sres
 
     if low.endswith(".apk"):
         res = analyze_apk_file(str(path))
@@ -69,17 +84,38 @@ def _scan_one(path: Path) -> Dict[str, Any]:
         d = asdict(ures)
         d["type"] = unix_fmt.lower()
         d["yara_matches"] = yara_hits
+        pyi = inspect_pyinstaller_binary(path)
+        if pyi.get("is_pyinstaller"):
+            d["pyinstaller"] = pyi
+            d["indicators"] = list(d.get("indicators", [])) + list(pyi.get("indicators", []))
+            d["risk_score"] = max(int(d.get("risk_score", 0)), int(pyi.get("risk_score", 0)))
         return d
 
     res = analyze_pe_file(str(path), source="CLI Scan")
-    if res is None:
-        return {"path": str(path), "type": "pe", "error": "Invalid PE/ELF/Mach-O/APK"}
-    d = asdict(res)
-    d["type"] = "pe"
-    d["yara_matches"] = yara_hits
-    if yara_hits and d.get("risk_score", 0) < 25 and not any("Calibrated:" in i for i in d.get("indicators", [])):
-        d["risk_score"] = min(100, d["risk_score"] + 25)
-    return d
+    if res is not None:
+        d = asdict(res)
+        d["type"] = "pe"
+        d["yara_matches"] = yara_hits
+        if yara_hits and d.get("risk_score", 0) < 25 and not any("Calibrated:" in i for i in d.get("indicators", [])):
+            d["risk_score"] = min(100, d["risk_score"] + 25)
+        pyi = inspect_pyinstaller_binary(path)
+        if pyi.get("is_pyinstaller"):
+            d["pyinstaller"] = pyi
+            d["indicators"] = list(d.get("indicators", [])) + [f"PyInstaller v{pyi.get('python_version','?')} archive ({pyi.get('toc_entry_count',0)} entries)"] + list(pyi.get("indicators", []))
+            d["risk_score"] = max(int(d.get("risk_score", 0)), int(pyi.get("risk_score", 0)))
+            if d["risk_score"] >= 75:
+                d["severity"] = "CRITICAL"
+            elif d["risk_score"] >= 50:
+                d["severity"] = "HIGH"
+        return d
+
+    # Fallback: Universal Any-File RAT & IOC Inspector
+    ares = analyze_any_file(path)
+    ares["name"] = path.name
+    ares["path"] = str(path)
+    ares["yara_matches"] = yara_hits
+    ares.setdefault("anomalies", [])
+    return ares
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
