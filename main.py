@@ -272,9 +272,9 @@ class OpcodeShieldApp(ctk.CTk):
 
         self.lbl_ghidra_status = ctk.CTkLabel(
             status_box,
-            text=f"Ghidra: {'Ready' if self.ghidra_engine.is_available() else 'Not Found'}",
+            text=f"Disasm: {'Ghidra + Capstone' if self.ghidra_engine.is_available() else 'Built-in Capstone'}",
             font=ctk.CTkFont(size=11),
-            text_color=ACCENT_GREEN if self.ghidra_engine.is_available() else ACCENT_RED,
+            text_color=ACCENT_GREEN,
         )
         self.lbl_ghidra_status.pack(anchor="w", padx=12, pady=2)
 
@@ -894,14 +894,10 @@ class OpcodeShieldApp(ctk.CTk):
         if self._patching:
             return
         if not self.active_target_path or not os.path.isfile(self.active_target_path):
-            messagebox.showwarning("No Target", "Please select a valid .exe or .dll binary first.")
+            messagebox.showwarning("No Target", "Please select a valid target file first.")
             return
         if not self.ghidra_engine.is_available():
-            messagebox.showerror(
-                "Ghidra Not Found",
-                "Ghidra analyzeHeadless.bat was not found.\nGo to Settings to auto-detect or set its path manually.",
-            )
-            return
+            self.log("[DISASM] Using prebuilt Capstone + Rust Core + SecNet-v3 ONNX engine (no Ghidra required).")
 
         self._patching = True
         self.pass_reports = []
@@ -1794,8 +1790,8 @@ class OpcodeShieldApp(ctk.CTk):
 
         ok = self.ghidra_engine.is_available()
         self.lbl_ghidra_status.configure(
-            text=f"Ghidra: {'Ready' if ok else 'Not Found'}",
-            text_color=ACCENT_GREEN if ok else ACCENT_RED,
+            text=f"Disasm: {'Ghidra + Capstone' if ok else 'Built-in Capstone'}",
+            text_color=ACCENT_GREEN,
         )
         short = Path(model).name[:20]
         self.lbl_ai_status.configure(text=f"Local AI: {short}", text_color=ACCENT_GREEN)

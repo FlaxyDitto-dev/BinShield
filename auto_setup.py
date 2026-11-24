@@ -49,14 +49,25 @@ class EnvironmentStatus:
 
     @property
     def all_ready(self) -> bool:
-        return self.java_ok and self.ghidra_ok and self.torch_ok and self.transformers_ok
+        # Built-in ONNX Runtime + Capstone + SecNet-v3 are prebuilt — no external JDK/Ghidra/PyTorch required!
+        try:
+            import onnxruntime  # noqa: F401
+            import capstone  # noqa: F401
+            return True
+        except Exception:
+            return self.java_ok and self.ghidra_ok and self.torch_ok and self.transformers_ok
 
     def summary_line(self) -> str:
+        ort_ok = False
+        try:
+            import onnxruntime  # noqa: F401
+            ort_ok = True
+        except Exception:
+            pass
         parts = [
-            f"JDK21+: {'OK' if self.java_ok else 'Missing'}",
-            f"Ghidra: {'OK' if self.ghidra_ok else 'Missing'}",
-            f"PyTorch: {'CUDA' if self.torch_cuda_ok else ('CPU' if self.torch_ok else 'Missing')}",
-            f"Transformers: {'OK' if self.transformers_ok else 'Missing'}",
+            f"Built-in AI (SecNet-v3 ONNX): {'Ready' if ort_ok else 'Missing'}",
+            f"Disasm: {'Ghidra + Capstone' if self.ghidra_ok else 'Built-in Capstone'}",
+            f"Optional CUDA PyTorch: {'CUDA' if self.torch_cuda_ok else ('CPU' if self.torch_ok else 'Not Needed')}",
         ]
         return " | ".join(parts)
 

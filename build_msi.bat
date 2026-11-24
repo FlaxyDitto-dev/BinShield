@@ -12,10 +12,10 @@ if not exist "dist\OpcodeShield-CLI.exe" (
     echo [!] dist\OpcodeShield-CLI.exe not found. Run build.bat first.
     exit /b 1
 )
-wix build installer\OpcodeShield.wxs -arch x64 -o dist\OpcodeShield-v4.1.0-Setup-x64.msi
+wix build installer\OpcodeShield.wxs -arch x64 -o dist\OpcodeShield-v4.1.1-Setup-x64.msi
 if errorlevel 1 (
     echo [!] WiX MSI build failed.
     exit /b 1
 )
-echo [+] Created Windows Installer: dist\OpcodeShield-v4.1.0-Setup-x64.msi
+echo [+] Created Windows Installer: dist\OpcodeShield-v4.1.1-Setup-x64.msi
 endlocal

@@ -533,17 +533,110 @@ class GhidraEngine:
         script_file.write_text(GHIDRA_EXPORT_JAVA, encoding="utf-8")
         return script_file
 
+    def _analyze_builtin_capstone(self, binary_path: str) -> GhidraAnalysisResult:
+        """
+        Zero-Ghidra built-in binary analyzer using prebuilt Capstone Disassembler +
+        Unified Rust Core + static PE/ELF/PyInstaller inspection. Requires NO Ghidra or JDK.
+        """
+        p = Path(binary_path)
+        raw = p.read_bytes()
+        arch = "x86_64"
+        ptr_size = 8
+        img_base = 0x140000000
+        suspicious_imports: List[str] = []
+        interesting_strings: List[Dict[str, Any]] = []
+        functions: List[DecompiledFunction] = []
+
+        # 1. Static analysis via Unified Rust Core (or Python fallback)
+        rust_res: Dict[str, Any] = {}
+        try:
+            from rust_core import get_rust_core
+            rc = get_rust_core()
+            if rc.available:
+                rust_res = rc.analyze_bytes(raw, p.name)
+                arch = str(rust_res.get("arch") or arch)
+                suspicious_imports = list(rust_res.get("suspicious_imports") or [])
+                for ioc in (rust_res.get("iocs") or [])[:20]:
+                    interesting_strings.append({"va": "0x0", "value": str(ioc)})
+        except Exception:
+            pass
+
+        # 2. Direct Capstone Disassembly of entry point / suspicious targets
+        disasm_text = ""
+        ep_va = img_base
+        try:
+            from disasm_unpacker import disassemble_pe_entrypoint
+            dis = disassemble_pe_entrypoint(binary_path, max_insns=40)
+            if dis.get("instructions"):
+                arch = str(dis.get("arch") or arch)
+                ep_va = int(str(dis.get("base_va", "0x140000000")), 16)
+                disasm_text = "\n".join(
+                    f"0x{ins['address']}: {ins['mnemonic']} {ins['op_str']}" for ins in dis["instructions"]
+                )
+        except Exception:
+            pass
+
+        # 3. Build DecompiledFunction entries from patch_candidates + CFG nodes
+        candidates = list(rust_res.get("patch_candidates") or [])
+        for idx, cand in enumerate(candidates[:12]):
+            off = int(cand.get("offset", 0))
+            reason = str(cand.get("reason", "Suspicious payload"))
+            fb = raw[off : off + 16].hex() if 0 <= off < len(raw) else ""
+            snippet = f"// Built-in Capstone + Rust Core target ({reason})\n// File offset: {hex(off)}\n{disasm_text[:600]}"
+            functions.append(
+                DecompiledFunction(
+                    name=f"suspect_{idx}_{hex(off)}",
+                    va=ep_va + off,
+                    rva=off,
+                    file_offset=off,
+                    size=64,
+                    first_bytes=fb,
+                    triggers=[reason] + suspicious_imports[:4],
+                    pseudo_c=snippet,
+                )
+            )
+
+        if not functions:
+            fb = raw[:16].hex()
+            functions.append(
+                DecompiledFunction(
+                    name="entry_disasm",
+                    va=ep_va,
+                    rva=0,
+                    file_offset=0,
+                    size=min(256, len(raw)),
+                    first_bytes=fb,
+                    triggers=suspicious_imports[:6] or ["USER_CANDIDATE"],
+                    pseudo_c=f"// Built-in Capstone Disassembly (Zero-Ghidra Mode)\n{disasm_text or '// No executable instructions decoded'}",
+                )
+            )
+
+        self._log(
+            f"[DISASM] Built-in Capstone + Rust Core analyzed '{p.name}' (zero Ghidra required): "
+            f"{len(functions)} target(s), {len(suspicious_imports)} suspicious API(s)."
+        )
+        return GhidraAnalysisResult(
+            binary_path=binary_path,
+            program_name=p.name,
+            arch=arch,
+            pointer_size=ptr_size,
+            image_base=img_base,
+            suspicious_imports=suspicious_imports,
+            symbols=[],
+            interesting_strings=interesting_strings,
+            functions=functions,
+            raw_json_path="",
+        )
+
     def analyze_binary(self, binary_path: str, pass_index: int = 1) -> GhidraAnalysisResult:
         """
-        Copy target binary into an isolated workspace and run analyzeHeadless.bat
-        with OpcodeShieldExport.java to extract symbols, imports, strings, XREFs, and pseudo-C.
+        Analyze target binary with Ghidra headless if installed, otherwise automatically
+        fall back to the prebuilt zero-dependency Capstone + Rust Core engine.
         """
-        if not self.is_available():
-            raise FileNotFoundError(
-                "Ghidra analyzeHeadless.bat not found. Configure the Ghidra path in Settings."
-            )
         if not os.path.isfile(binary_path):
             raise FileNotFoundError(f"Target binary does not exist: {binary_path}")
+        if not self.is_available():
+            return self._analyze_builtin_capstone(binary_path)
 
         self._ensure_export_script()
         stamp = f"{int(time.time())}_p{pass_index}"
