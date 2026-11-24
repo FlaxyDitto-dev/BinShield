@@ -272,7 +272,7 @@ class OpcodeShieldApp(ctk.CTk):
 
         self.lbl_ghidra_status = ctk.CTkLabel(
             status_box,
-            text=f"Disasm: {'Ghidra + Capstone' if self.ghidra_engine.is_available() else 'Built-in Capstone'}",
+            text="Disasm: Built-in Capstone",
             font=ctk.CTkFont(size=11),
             text_color=ACCENT_GREEN,
         )
@@ -739,7 +739,7 @@ class OpcodeShieldApp(ctk.CTk):
         row1.pack(fill="x", padx=16, pady=(14, 6))
         ctk.CTkLabel(
             row1,
-            text="Iterative Ghidra Decompile & Local AI Patch Lab",
+            text="Iterative Capstone Disasm & Local AI Patch Lab",
             font=ctk.CTkFont(size=18, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
@@ -905,9 +905,9 @@ class OpcodeShieldApp(ctk.CTk):
         self.btn_start_patch.configure(state="disabled")
         self.btn_cancel_patch.configure(state="normal")
         self.btn_deploy_patch.configure(state="disabled")
-        self.lbl_patch_verdict.configure(text="Running Ghidra + Local AI...", text_color=BORDER_ACCENT)
+        self.lbl_patch_verdict.configure(text="Running Capstone + SecNet-v3 AI...", text_color=BORDER_ACCENT)
 
-        self._set_textbox(self.audit_viewer, "Starting Pass 1 headless decompilation...\n")
+        self._set_textbox(self.audit_viewer, "Starting Pass 1 Built-in Capstone + Rust Core analysis...\n")
         self._set_textbox(self.diff_box, "Awaiting patches...\n")
 
         model_id = self.settings.data.get("llm_model", "") or DEFAULT_LOCAL_MODEL

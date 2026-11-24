@@ -628,14 +628,16 @@ class GhidraEngine:
             raw_json_path="",
         )
 
-    def analyze_binary(self, binary_path: str, pass_index: int = 1) -> GhidraAnalysisResult:
+    def analyze_binary(self, binary_path: str, pass_index: int = 1, use_ghidra_headless: bool = False) -> GhidraAnalysisResult:
         """
-        Analyze target binary with Ghidra headless if installed, otherwise automatically
-        fall back to the prebuilt zero-dependency Capstone + Rust Core engine.
+        Analyze target binary using the prebuilt, instant (<1s) Capstone Disassembler +
+        Unified Rust Core engine by default (zero Java/Ghidra required, never times out).
+        Optional Ghidra Headless mode is only used if explicitly requested via use_ghidra_headless=True,
+        and automatically falls back to Built-in Capstone on any error or timeout.
         """
         if not os.path.isfile(binary_path):
             raise FileNotFoundError(f"Target binary does not exist: {binary_path}")
-        if not self.is_available():
+        if not use_ghidra_headless or not self.is_available():
             return self._analyze_builtin_capstone(binary_path)
 
         self._ensure_export_script()
