@@ -1000,7 +1000,7 @@ class OpcodeShieldApp(ctk.CTk):
         if not report.malicious_findings:
             lines.append("  (None — binary confirmed clean!)")
 
-        lines.append("\n--- Ghidra Decompiled Pseudo-C Preview ---")
+        lines.append("\n--- Capstone Disassembly & Code Preview ---")
         lines.append(report.decompiled_preview or "(No pseudo-C available)")
         self._set_textbox(self.audit_viewer, "\n".join(lines))
 

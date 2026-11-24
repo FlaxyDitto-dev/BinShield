@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-APP_VERSION = "4.1.2"
+APP_VERSION = "4.1.3"
 GITHUB_REPO = "FlaxyDitto-dev/OpcodeShield"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 

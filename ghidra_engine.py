@@ -561,34 +561,42 @@ class GhidraEngine:
         except Exception:
             pass
 
-        # 2. Direct Capstone Disassembly of entry point / suspicious targets
-        disasm_text = ""
-        ep_va = img_base
-        try:
-            from disasm_unpacker import disassemble_pe_entrypoint
-            dis = disassemble_pe_entrypoint(binary_path, max_insns=40)
-            if dis.get("instructions"):
-                arch = str(dis.get("arch") or arch)
-                ep_va = int(str(dis.get("base_va", "0x140000000")), 16)
-                disasm_text = "\n".join(
-                    f"0x{ins['address']}: {ins['mnemonic']} {ins['op_str']}" for ins in dis["instructions"]
-                )
-        except Exception:
-            pass
+        # 2. Direct Capstone Disassembly helper (uses exact keys: va, bytes, mnemonic, op_str)
+        from disasm_unpacker import disassemble_pe_entrypoint
 
-        # 3. Build DecompiledFunction entries from patch_candidates + CFG nodes
+        def _disasm_at(fo: Optional[int], count: int = 24) -> Tuple[str, int, int]:
+            try:
+                dis = disassemble_pe_entrypoint(binary_path, file_offset=fo, max_insns=count)
+                insns = dis.get("instructions") or []
+                va_int = int(str(dis.get("base_va", "0x140000000")), 16)
+                fo_int = int(str(dis.get("file_offset", "0x0")), 16)
+                if insns:
+                    lines = [f"{ins['va']}:  {ins['mnemonic']:<8} {ins['op_str']}" for ins in insns]
+                    return "\n".join(lines), va_int, fo_int
+            except Exception:
+                pass
+            return "", img_base + (fo or 0), (fo or 0)
+
+        ep_disasm, ep_va, ep_fo = _disasm_at(None, count=30)
+
+        # 3. Build DecompiledFunction entries from patch_candidates AND Rust CFG function nodes
+        seen_offsets = set()
         candidates = list(rust_res.get("patch_candidates") or [])
-        for idx, cand in enumerate(candidates[:12]):
+        for idx, cand in enumerate(candidates[:10]):
             off = int(cand.get("offset", 0))
+            if off in seen_offsets:
+                continue
+            seen_offsets.add(off)
             reason = str(cand.get("reason", "Suspicious payload"))
-            fb = raw[off : off + 16].hex() if 0 <= off < len(raw) else ""
-            snippet = f"// Built-in Capstone + Rust Core target ({reason})\n// File offset: {hex(off)}\n{disasm_text[:600]}"
+            dtext, fva, ffo = _disasm_at(off, count=22)
+            fb = raw[ffo : ffo + 16].hex() if 0 <= ffo < len(raw) else ""
+            snippet = f"DISASM {arch} // {reason} @ file_offset={hex(ffo)}\n{dtext or '// Raw payload bytes: ' + fb}"
             functions.append(
                 DecompiledFunction(
-                    name=f"suspect_{idx}_{hex(off)}",
-                    va=ep_va + off,
-                    rva=off,
-                    file_offset=off,
+                    name=f"suspect_{idx}_{hex(ffo)}",
+                    va=fva,
+                    rva=ffo,
+                    file_offset=ffo,
                     size=64,
                     first_bytes=fb,
                     triggers=[reason] + suspicious_imports[:4],
@@ -596,18 +604,46 @@ class GhidraEngine:
                 )
             )
 
-        if not functions:
-            fb = raw[:16].hex()
+        cfg_nodes = list((rust_res.get("cfg") or {}).get("nodes") or [])
+        for node in cfg_nodes:
+            if len(functions) >= 10:
+                break
+            nkind = str(node.get("kind", ""))
+            off = int(node.get("offset", 0))
+            if nkind not in ("function", "malicious") or off <= 0 or off in seen_offsets:
+                continue
+            seen_offsets.add(off)
+            dtext, fva, ffo = _disasm_at(off, count=20)
+            if not dtext:
+                continue
+            fb = raw[ffo : ffo + 16].hex() if 0 <= ffo < len(raw) else ""
+            nlabel = str(node.get("label") or f"sub_{hex(ffo)}")
+            trig = suspicious_imports[:5] if nkind == "malicious" else ["USER_CANDIDATE"]
             functions.append(
                 DecompiledFunction(
-                    name="entry_disasm",
+                    name=nlabel,
+                    va=fva,
+                    rva=ffo,
+                    file_offset=ffo,
+                    size=int(node.get("size", 128)),
+                    first_bytes=fb,
+                    triggers=trig,
+                    pseudo_c=f"DISASM {arch} // {nlabel} @ file_offset={hex(ffo)}\n{dtext}",
+                )
+            )
+
+        if not functions:
+            fb = raw[ep_fo : ep_fo + 16].hex() if 0 <= ep_fo < len(raw) else ""
+            functions.append(
+                DecompiledFunction(
+                    name=f"sub_{hex(ep_fo)}",
                     va=ep_va,
-                    rva=0,
-                    file_offset=0,
+                    rva=ep_fo,
+                    file_offset=ep_fo,
                     size=min(256, len(raw)),
                     first_bytes=fb,
                     triggers=suspicious_imports[:6] or ["USER_CANDIDATE"],
-                    pseudo_c=f"// Built-in Capstone Disassembly (Zero-Ghidra Mode)\n{disasm_text or '// No executable instructions decoded'}",
+                    pseudo_c=f"DISASM {arch} // EntryPoint @ file_offset={hex(ep_fo)}\n{ep_disasm or '// Raw bytes: ' + fb}",
                 )
             )
 
